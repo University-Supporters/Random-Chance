@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  booth-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: heyum-booth-raffle
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - ADMIN_PASSWORD=heyum2026!
+      - NODE_ENV=production
+    volumes:
+      # 서버 데이터 영구 저장 볼륨 마운트
+      - ./data:/app/data
