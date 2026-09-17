@@ -12,14 +12,13 @@ export default function App() {
     return localStorage.getItem('heyum_admin_token') || '';
   });
 
-  // URL 경로 감지 (예: /admin 직접 접근 시 관리자 화면으로)
+  // URL 경로 감지 (/admin 직접 접근 지원)
   useEffect(() => {
     if (window.location.pathname.startsWith('/admin')) {
       setView('admin');
     }
   }, []);
 
-  // 사용자 화면 전환
   const handleGoHome = () => {
     setView('form');
     if (window.location.pathname.startsWith('/admin')) {
@@ -27,7 +26,6 @@ export default function App() {
     }
   };
 
-  // 관리자 전환 토글
   const handleToggleAdmin = () => {
     if (view === 'admin') {
       setView('form');
@@ -38,19 +36,16 @@ export default function App() {
     }
   };
 
-  // 응모 성공
   const handleFormSuccess = (name) => {
     setParticipantName(name);
     setView('success');
   };
 
-  // 관리자 로그인 성공
   const handleAdminLoginSuccess = (token) => {
     setAdminToken(token);
     localStorage.setItem('heyum_admin_token', token);
   };
 
-  // 관리자 로그아웃
   const handleAdminLogout = () => {
     setAdminToken('');
     localStorage.removeItem('heyum_admin_token');
@@ -58,23 +53,29 @@ export default function App() {
     window.history.pushState({}, '', '/');
   };
 
+  const isUserView = view === 'form' || view === 'success';
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
-      {/* 상단 네비게이션 헤더 */}
+    <div className={`w-full bg-[#0b0f19] text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white ${
+      isUserView ? 'h-screen max-h-screen overflow-hidden justify-between' : 'min-h-screen'
+    }`}>
+      {/* 1. 상단 슬림 네비게이션 헤더 */}
       <Header
         isAdmin={view === 'admin'}
         onToggleAdmin={handleToggleAdmin}
         onGoHome={handleGoHome}
       />
 
-      {/* 메인 콘텐츠 영역 */}
-      <main className="flex-1 flex flex-col justify-center px-4 py-8 sm:py-12">
-        {/* 1. 사용자 응모 폼 */}
+      {/* 2. 메인 콘텐츠 영역 (사용자 화면 시 스크롤 없이 수직 중앙 정렬) */}
+      <main className={`flex-1 flex flex-col justify-center items-center px-4 ${
+        isUserView ? 'py-1 overflow-hidden' : 'py-8'
+      }`}>
+        {/* 사용자 응모 폼 */}
         {view === 'form' && (
           <UserForm onSuccess={handleFormSuccess} />
         )}
 
-        {/* 2. 응모 완료 화면 */}
+        {/* 응모 완료 화면 */}
         {view === 'success' && (
           <SuccessCard
             participantName={participantName}
@@ -82,7 +83,7 @@ export default function App() {
           />
         )}
 
-        {/* 3. 관리자 화면 */}
+        {/* 관리자 화면 */}
         {view === 'admin' && (
           adminToken ? (
             <AdminDashboard
@@ -98,11 +99,11 @@ export default function App() {
         )}
       </main>
 
-      {/* 하단 푸터 */}
-      <footer className="w-full border-t border-slate-900/80 py-6 text-center text-xs text-slate-500 font-medium">
-        <div className="max-w-4xl mx-auto px-4 space-y-1">
-          <p>© 2026 인권 서포터즈 혜윰. All Rights Reserved.</p>
-          <p>모두가 평등하고 존중받는 따뜻한 캠퍼스 문화를 만들어갑니다.</p>
+      {/* 3. 하단 미니멀 푸터 */}
+      <footer className="w-full border-t border-white/[0.04] py-2.5 text-center text-[11px] text-slate-500 font-medium shrink-0">
+        <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-1">
+          <span>© 2026 인권 서포터즈 혜윰</span>
+          <span className="text-slate-600 hidden sm:inline">모두가 존중받는 따뜻한 캠퍼스 문화</span>
         </div>
       </footer>
     </div>

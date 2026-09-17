@@ -32,61 +32,61 @@ export default function AdminLogin({ onLoginSuccess, onCancel }) {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto outdoor-contrast-card rounded-3xl p-6 sm:p-8 border-4 border-slate-700 shadow-2xl animate-scale-up">
-      <div className="flex items-center justify-between mb-6">
+    <div className="w-full max-w-sm mx-auto my-auto glass-panel rounded-3xl p-6 sm:p-7 shadow-2xl animate-scale-up">
+      <div className="flex items-center justify-between mb-5">
         <button
           onClick={onCancel}
-          className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 transition-colors"
+          className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-white transition-colors cursor-pointer"
         >
-          <ArrowLeft className="w-4 h-4" /> 사용자 화면으로
+          <ArrowLeft className="w-3.5 h-3.5" /> 응모 화면
         </button>
-        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-300">
-          서포터즈 운영진 전용
+        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-white/10">
+          서포터즈 운영진
         </span>
       </div>
 
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-3 shadow-inner">
-          <Lock className="w-8 h-8" />
+      <div className="text-center mb-5">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-500/25 text-indigo-400 flex items-center justify-center mb-2.5 shadow-inner">
+          <Lock className="w-6 h-6" />
         </div>
-        <h3 className="text-2xl font-black text-slate-900">관리자 인증</h3>
-        <p className="mt-1 text-sm font-medium text-slate-500">
-          부스 운영진 비밀번호를 입력해주세요.
+        <h3 className="text-xl font-black text-white">관리자 로그인</h3>
+        <p className="mt-0.5 text-xs text-slate-400">
+          부스 운영진 비밀번호를 입력해 주세요.
         </p>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 rounded-xl bg-red-100 border border-red-400 text-red-900 text-sm font-bold flex items-center gap-2">
-          <ShieldAlert className="w-5 h-5 shrink-0 text-red-600" />
+        <div className="mb-4 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-red-400" />
           <span>{error}</span>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-3.5">
         <div>
-          <label className="block text-slate-700 font-bold text-sm mb-1.5 flex items-center gap-1.5">
-            <KeyRound className="w-4 h-4 text-indigo-600" /> 운영진 비밀번호
+          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+            <KeyRound className="w-3.5 h-3.5 text-indigo-400" /> 운영진 비밀번호
           </label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="비밀번호를 입력하세요"
+            placeholder="비밀번호 입력"
             autoFocus
             required
-            className="w-full text-lg font-bold px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 outline-none text-slate-900"
+            className="modern-input w-full h-11 px-3.5 rounded-xl text-sm font-bold"
           />
         </div>
 
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-black text-base shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2"
+          className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-[0.99] text-white font-bold text-xs shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
         >
           {isLoading ? (
-            <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
           ) : (
-            <span>관리자 대시보드 로그인</span>
+            <span>로그인하기</span>
           )}
         </button>
       </form>

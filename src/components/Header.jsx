@@ -1,51 +1,46 @@
 import React from 'react';
-import { Sparkles, ShieldCheck, Settings, Award } from 'lucide-react';
+import { Sparkles, ShieldCheck, Settings, Gift } from 'lucide-react';
 
 export default function Header({ isAdmin, onToggleAdmin, onGoHome }) {
   return (
-    <header className="w-full bg-slate-900/90 backdrop-blur border-b border-slate-800 sticky top-0 z-30">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <header className="w-full bg-slate-950/40 backdrop-blur-md border-b border-white/[0.06] sticky top-0 z-30 shrink-0">
+      <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
         {/* 로고 & 타이틀 */}
         <div 
           onClick={onGoHome}
-          className="flex items-center gap-3 cursor-pointer group select-none"
+          className="flex items-center gap-2.5 cursor-pointer select-none group"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-amber-400 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-            <Sparkles className="w-6 h-6 text-white" />
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
+            <Gift className="w-4 h-4 text-white" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                2026 축제 부스
-              </span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                <Award className="w-3 h-3" /> GS25 1만원권 50명
-              </span>
-            </div>
-            <h1 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-1.5 mt-0.5">
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">
               인권 서포터즈 <span className="text-indigo-400">혜윰</span>
-            </h1>
+            </span>
+            <span className="hidden sm:inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20">
+              GS25 1만원권 50명
+            </span>
           </div>
         </div>
 
-        {/* 관리자 전환 버튼 */}
+        {/* 우측 모드 전환 */}
         <div className="flex items-center gap-2">
           {isAdmin ? (
             <button
               onClick={onToggleAdmin}
-              className="flex items-center gap-1.5 text-xs sm:text-sm font-medium px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-white/10 transition-all cursor-pointer"
             >
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>사용자 화면 보기</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>응모 화면</span>
             </button>
           ) : (
             <button
               onClick={onToggleAdmin}
-              className="flex items-center gap-1.5 text-xs sm:text-sm font-medium px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/60 transition-colors"
-              title="관리자 페이지"
+              className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-all cursor-pointer"
+              title="운영진 페이지"
             >
-              <Settings className="w-4 h-4" />
-              <span className="hidden sm:inline">운영진 관리</span>
+              <Settings className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">운영진</span>
             </button>
           )}
         </div>
