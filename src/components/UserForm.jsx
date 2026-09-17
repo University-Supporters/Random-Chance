@@ -3,7 +3,7 @@ import { GraduationCap, User, Phone, CheckCircle2, AlertCircle, Sparkles } from 
 import { formatPhoneNumber } from '../lib/utils';
 import ConfirmModal from './ConfirmModal';
 
-export default function UserForm({ onSuccess }) {
+export default function UserForm({ onSuccess, operator }) {
   const [formData, setFormData] = useState({
     studentId: '',
     name: '',
@@ -65,7 +65,7 @@ export default function UserForm({ onSuccess }) {
       const res = await fetch('/api/participants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, operator }),
       });
 
       const data = await res.json();

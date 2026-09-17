@@ -56,12 +56,13 @@ export default function ParticipantList({
 
   // CSV 내보내기 (최신순)
   const handleExportCSV = () => {
-    const headers = ['번호', '학번', '이름', '전화번호', '참여일시', '접속IP'];
+    const headers = ['번호', '학번', '이름', '전화번호', '등록단말기', '참여일시', '접속IP'];
     const rows = sortedParticipants.map((p, idx) => [
       idx + 1,
       p.studentId,
       p.name,
       p.phone,
+      p.operator || '미지정',
       formatDateTime(p.createdAt),
       p.ip || '-'
     ]);
@@ -121,6 +122,7 @@ export default function ParticipantList({
                 <th className="py-3.5 px-4">학번</th>
                 <th className="py-3.5 px-4">이름</th>
                 <th className="py-3.5 px-4">전화번호</th>
+                <th className="py-3.5 px-4">등록 단말기</th>
                 <th className="py-3.5 px-4 hidden md:table-cell">참여일시</th>
                 <th className="py-3.5 px-4 hidden lg:table-cell">접속 IP</th>
                 <th className="py-3.5 px-4 text-right w-20">관리</th>
@@ -129,7 +131,7 @@ export default function ParticipantList({
             <tbody className="divide-y divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500 font-medium">
+                  <td colSpan={8} className="py-12 text-center text-slate-500 font-medium">
                     {search ? '검색 결과와 일치하는 참여자가 없습니다.' : '아직 등록된 참여자가 없습니다.'}
                   </td>
                 </tr>
@@ -147,6 +149,11 @@ export default function ParticipantList({
                     </td>
                     <td className="py-3 px-4 font-mono text-indigo-400">
                       {p.phone}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25">
+                        <span>💻</span> {p.operator || '미지정'}
+                      </span>
                     </td>
                     <td className="py-3 px-4 hidden md:table-cell text-xs text-slate-400">
                       {formatDateTime(p.createdAt)}
