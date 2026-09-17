@@ -11,7 +11,8 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - ADMIN_PASSWORD=heyum2026!
+      - ADMIN_PASSWORD=1111
+      - RESET_PASSWORD=heyum
       - NODE_ENV=production
     volumes:
       # 서버 데이터 영구 저장 볼륨 마운트

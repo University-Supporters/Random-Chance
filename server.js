@@ -9,7 +9,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'heyum2026!';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1111';
+const RESET_PASSWORD = process.env.RESET_PASSWORD || 'heyum';
 
 app.use(cors());
 app.use(express.json());
@@ -353,9 +354,17 @@ router.post('/admin/reset-draw', authMiddleware, async (req, res) => {
   }
 });
 
-// 10. 모든 데이터 전체 초기화 (참여자, 당첨자, 감사로그 일괄 삭제)
+// 10. 모든 데이터 전체 초기화 (참여자, 당첨자, 감사로그 일괄 삭제 - 전용 보안 비밀번호 필요)
 router.post('/admin/reset-all', authMiddleware, async (req, res) => {
   try {
+    const { resetPassword } = req.body || {};
+    if (!resetPassword || resetPassword !== RESET_PASSWORD) {
+      return res.status(403).json({ 
+        success: false, 
+        message: '초기화 전용 관리자 비밀번호가 일치하지 않습니다.' 
+      });
+    }
+
     const cleanDb = {
       participants: [],
       logs: [],
@@ -367,6 +376,14 @@ router.post('/admin/reset-all', authMiddleware, async (req, res) => {
       }
     };
     await saveDbData(cleanDb);
+
+    await addAuditLog({
+      type: '데이터 전체 초기화',
+      operator: '최고 관리자',
+      ip: getClientIp(req),
+      detail: '전용 초기화 비밀번호 확인을 통해 모든 응모자 명단 및 감사 로그를 초기화함'
+    });
+
     res.json({ success: true, message: '모든 참여자 명단 및 감사 로그가 성공적으로 초기화되었습니다.' });
   } catch (err) {
     res.status(500).json({ success: false, message: '초기화 실패' });
@@ -416,6 +433,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`[서버 구동] 포트 ${PORT}에서 축제 부스 상품권 서버가 실행 중입니다.`);
     console.log(`스토리지 모드: ${getStorageMode()}`);
     console.log(`관리자 기본 비밀번호: ${ADMIN_PASSWORD}`);
+    console.log(`초기화 전용 비밀번호: ${RESET_PASSWORD}`);
   });
 }
 

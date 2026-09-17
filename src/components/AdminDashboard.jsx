@@ -140,15 +140,25 @@ export default function AdminDashboard({ token, onLogout }) {
     }
   };
 
-  // 모든 데이터 전체 초기화 (참여자, 감사로그 일괄 삭제)
+  // 모든 데이터 전체 초기화 (참여자, 감사로그 일괄 삭제 - 전용 보안 비밀번호 확인)
   const handleResetAll = async () => {
-    if (!confirm('⚠️ 경고: 모든 참여자 명단, 당첨자 내역, 감사 로그가 영구 삭제됩니다.\n정말로 모든 데이터를 전체 초기화하시겠습니까?')) {
+    const inputPassword = window.prompt(
+      '⚠️ [보안 경고] 모든 참여자 명단, 당첨자 내역, 감사 로그가 영구 삭제됩니다.\n\n계속 진행하시려면 초기화 전용 관리자 비밀번호를 입력해 주세요:'
+    );
+    if (inputPassword === null) return; // 사용자가 취소함
+    if (!inputPassword.trim()) {
+      alert('초기화 비밀번호가 입력되지 않았습니다.');
       return;
     }
+
     try {
       const res = await fetch('/api/admin/reset-all', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ resetPassword: inputPassword.trim() }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -158,10 +168,10 @@ export default function AdminDashboard({ token, onLogout }) {
         showToast('모든 참여자 명단 및 감사 로그가 초기화되었습니다.');
         fetchData();
       } else {
-        alert(data.message || '초기화 실패');
+        alert(data.message || '초기화 실패: 비밀번호가 올바르지 않습니다.');
       }
     } catch (err) {
-      alert('전체 초기화 중 오류가 발생했습니다.');
+      alert('전체 초기화 중 통신 오류가 발생했습니다.');
     }
   };
 
