@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GraduationCap, User, Phone, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 import { formatPhoneNumber } from '../lib/utils';
 import ConfirmModal from './ConfirmModal';
+import PrivacyModal from './PrivacyModal';
 
 export default function UserForm({ onSuccess, operator }) {
   const [formData, setFormData] = useState({
@@ -12,6 +13,7 @@ export default function UserForm({ onSuccess, operator }) {
 
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -164,19 +166,28 @@ export default function UserForm({ onSuccess, operator }) {
             />
           </div>
 
-          {/* 개인정보 동의 (컴팩트 1줄 형태) */}
+          {/* 개인정보 동의 및 상세보기 버튼 */}
           <div className="pt-1">
-            <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] cursor-pointer hover:bg-white/[0.06] transition-colors select-none">
-              <input
-                type="checkbox"
-                checked={agreeTerms}
-                onChange={(e) => setAgreeTerms(e.target.checked)}
-                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-700 bg-slate-900 cursor-pointer"
-              />
-              <span className="text-[11px] text-slate-400 leading-tight">
-                <strong className="text-slate-300">[필수]</strong> 개인정보(학번·성명·연락처) 수집 및 경품 추첨 안내 동의
-              </span>
-            </label>
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.05] transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer select-none flex-1 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={agreeTerms}
+                  onChange={(e) => setAgreeTerms(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-700 bg-slate-900 cursor-pointer shrink-0"
+                />
+                <span className="text-[11px] text-slate-300 leading-tight truncate">
+                  <strong className="text-indigo-400">[필수]</strong> 개인정보 수집 및 이용 동의
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPrivacyModal(true)}
+                className="text-[11px] font-semibold text-slate-400 hover:text-indigo-300 underline underline-offset-2 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer shrink-0"
+              >
+                상세보기
+              </button>
+            </div>
           </div>
 
           {/* 제출 버튼 */}
@@ -201,6 +212,16 @@ export default function UserForm({ onSuccess, operator }) {
         onConfirm={handleFinalSubmit}
         formData={formData}
         isSubmitting={isSubmitting}
+      />
+
+      {/* 개인정보 수집 및 이용 동의 상세 모달 */}
+      <PrivacyModal
+        isOpen={showPrivacyModal}
+        onClose={() => setShowPrivacyModal(false)}
+        onAgree={() => {
+          setAgreeTerms(true);
+          setShowPrivacyModal(false);
+        }}
       />
     </div>
   );
