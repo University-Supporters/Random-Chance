@@ -341,15 +341,22 @@ router.get('/health', (req, res) => {
 app.use('/api', router);
 app.use('/', router);
 
-// 프로덕션 빌드 정적 서빙
+// 프로덕션 빌드 정적 서빙 (캐시 방지 헤더 적용)
 const distPath = path.resolve(__dirname, 'dist');
-app.use(express.static(distPath));
+app.use(express.static(distPath, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    }
+  }
+}));
 
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api')) {
     return res.status(404).json({ error: 'API route not found' });
   }
   const indexHtml = path.join(distPath, 'index.html');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.sendFile(indexHtml);
 });
 

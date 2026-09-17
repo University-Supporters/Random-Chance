@@ -41,6 +41,10 @@ export default function App() {
     setView('success');
   };
 
+  const handleResetToForm = React.useCallback(() => {
+    setView('form');
+  }, []);
+
   const handleAdminLoginSuccess = (token) => {
     setAdminToken(token);
     localStorage.setItem('heyum_admin_token', token);
@@ -79,7 +83,7 @@ export default function App() {
         {view === 'success' && (
           <SuccessCard
             participantName={participantName}
-            onReset={() => setView('form')}
+            onReset={handleResetToForm}
           />
         )}
 
