@@ -40,6 +40,10 @@ export default function ParticipantList({
       setActionError('모든 필드를 입력해주세요.');
       return;
     }
+    if (!/^60\d{6}$/.test(newEntry.studentId.trim())) {
+      setActionError('학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)');
+      return;
+    }
     const success = await onAdd(newEntry);
     if (success) {
       setShowAddModal(false);
@@ -198,12 +202,14 @@ export default function ParticipantList({
             )}
             <form onSubmit={handleAddSubmit} className="mt-4 space-y-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">학번</label>
+                <label className="block text-xs font-bold text-slate-600 mb-1">학번 (60xxxxxx)</label>
                 <input
-                  type="text"
+                  type="tel"
+                  inputMode="numeric"
                   value={newEntry.studentId}
-                  onChange={(e) => setNewEntry({ ...newEntry, studentId: e.target.value })}
-                  placeholder="예: 20241234"
+                  onChange={(e) => setNewEntry({ ...newEntry, studentId: e.target.value.replace(/[^0-9]/g, '') })}
+                  placeholder="예: 60241234"
+                  maxLength={8}
                   required
                   className="w-full px-3 py-2 border rounded-xl font-mono text-sm"
                 />

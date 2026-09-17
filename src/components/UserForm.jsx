@@ -38,8 +38,9 @@ export default function UserForm({ onSuccess, operator }) {
     e.preventDefault();
     setErrorMessage('');
 
-    if (!formData.studentId || formData.studentId.length < 6) {
-      setErrorMessage('올바른 학번(6자리 이상)을 입력해 주세요.');
+    // 60xxxxxx 8자리 학번 검증
+    if (!/^60\d{6}$/.test(formData.studentId)) {
+      setErrorMessage('학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)');
       return;
     }
     if (!formData.name.trim()) {
@@ -123,8 +124,8 @@ export default function UserForm({ onSuccess, operator }) {
                 inputMode="numeric"
                 value={formData.studentId}
                 onChange={handleStudentIdChange}
-                placeholder="20241234"
-                maxLength={12}
+                placeholder="60241234"
+                maxLength={8}
                 required
                 className="modern-input w-full h-11 px-3.5 rounded-xl text-sm sm:text-base font-bold tracking-wider placeholder:text-slate-600"
               />

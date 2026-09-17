@@ -77,6 +77,14 @@ router.post('/participants', async (req, res) => {
     const cleanStudentId = studentId.trim();
     const cleanName = name.trim();
 
+    // 60xxxxxx 8자리 학번 양식 검증
+    if (!/^60\d{6}$/.test(cleanStudentId)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: '학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)' 
+      });
+    }
+
     if (cleanPhone.length < 10 || cleanPhone.length > 11) {
       return res.status(400).json({ success: false, message: '올바른 전화번호 10~11자리를 입력해주세요.' });
     }
@@ -187,13 +195,21 @@ router.post('/admin/participants', authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: '모든 필드를 입력해주세요.' });
     }
 
+    const cleanStudentId = studentId.trim();
+    if (!/^60\d{6}$/.test(cleanStudentId)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: '학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)' 
+      });
+    }
+
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     const db = await getDbData();
     if (!db.participants) db.participants = [];
 
     const newParticipant = {
       id: 'p_admin_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      studentId: studentId.trim(),
+      studentId: cleanStudentId,
       name: name.trim(),
       phone: phone.trim(),
       phoneClean: cleanPhone,
