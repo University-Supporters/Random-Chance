@@ -16,8 +16,13 @@ export default function ParticipantList({
   const [deleteReason, setDeleteReason] = useState('');
   const [actionError, setActionError] = useState('');
 
+  // 최신 등록 순 정렬 (최신 입력자가 최상단에 노출)
+  const sortedParticipants = [...participants].sort((a, b) => {
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+
   // 필터링된 참여자 목록
-  const filtered = participants.filter((p) => {
+  const filtered = sortedParticipants.filter((p) => {
     const q = search.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -49,10 +54,10 @@ export default function ParticipantList({
     setDeleteReason('');
   };
 
-  // CSV 내보내기
+  // CSV 내보내기 (최신순)
   const handleExportCSV = () => {
     const headers = ['번호', '학번', '이름', '전화번호', '참여일시', '접속IP'];
-    const rows = participants.map((p, idx) => [
+    const rows = sortedParticipants.map((p, idx) => [
       idx + 1,
       p.studentId,
       p.name,

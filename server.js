@@ -145,14 +145,15 @@ router.post('/admin/login', async (req, res) => {
   }
 });
 
-// 3. 관리자 참여자 목록 및 통계 조회
+// 3. 관리자 참여자 목록 및 통계 조회 (최신 등록순)
 router.get('/admin/participants', authMiddleware, async (req, res) => {
   try {
     const db = await getDbData();
+    const sorted = [...(db.participants || [])].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     res.json({
       success: true,
       totalCount: (db.participants || []).length,
-      participants: db.participants || [],
+      participants: sorted,
       winners: db.winners || [],
       storageMode: getStorageMode()
     });
