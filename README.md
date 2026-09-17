@@ -52,6 +52,22 @@ npm run dev
 docker-compose up --build -d
 ```
 
-### 3. Vercel 배포
-- 본 레포지토리를 GitHub에 연결 후 Vercel에 임포트
-- 필요 시 환경변수 설정 (`DATABASE_URL`, `ADMIN_PASSWORD` 등)
+### 3. Vercel 배포 (서포터즈 어디서나 접속)
+1. **GitHub 레포지토리 연결**:
+   - [Vercel](https://vercel.com)에 로그인 후 `Add New...` → `Project` 클릭
+   - `University-Supporters/Random-Chance` 레포지토리를 **Import**
+   - Framework Preset: **Vite** (자동 감지)
+2. **배포 클릭**:
+   - 별도 빌드 설정 수정 없이 **Deploy** 버튼 클릭
+3. **영구 스토리지(DB) 연동 (택 1 - 어느 컴퓨터에서나 동일 데이터 동기화)**:
+   - **옵션 A (Vercel KV / Upstash - 가장 추천, 1분 소요)**:
+     - Vercel 대시보드 프로젝트의 **Storage** 탭 이동
+     - **Create Database** → **KV** 선택 후 연결
+     - 환경변수가 자동 등록되어 즉시 초고속 영구 저장소로 작동합니다.
+   - **옵션 B (GitHub 저장소 연동 - 무료, 무설치)**:
+     - Vercel 프로젝트 → **Settings → Environment Variables**에 아래 2개 환경변수 등록:
+       - `GITHUB_TOKEN`: GitHub Personal Access Token (repo 권한)
+       - `GITHUB_REPO`: `University-Supporters/Random-Chance`
+   - **옵션 C (관리자 비밀번호 변경)**:
+     - `ADMIN_PASSWORD`: 원하는 운영진 비밀번호 (기본값: `heyum2026!`)
+

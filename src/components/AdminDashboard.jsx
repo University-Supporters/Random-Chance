@@ -17,6 +17,9 @@ export default function AdminDashboard({ token, onLogout }) {
     setTimeout(() => setNotification(''), 3000);
   };
 
+  const [storageMode, setStorageMode] = useState('');
+  const [showStorageGuide, setShowStorageGuide] = useState(false);
+
   // 데이터 로드
   const fetchData = async () => {
     setIsLoading(true);
@@ -34,6 +37,7 @@ export default function AdminDashboard({ token, onLogout }) {
         const dataPart = await resPart.json();
         setParticipants(dataPart.participants || []);
         setWinners(dataPart.winners || []);
+        if (dataPart.storageMode) setStorageMode(dataPart.storageMode);
       }
       if (resLogs.ok) {
         const dataLogs = await resLogs.json();
@@ -148,12 +152,23 @@ export default function AdminDashboard({ token, onLogout }) {
       {/* 통계 요약 카드 & 상단 바 */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between pb-2">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
-            <span>부스 운영 대시보드</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              부스 운영 대시보드
+            </h2>
             <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
               서포터즈 관리자
             </span>
-          </h2>
+            {storageMode && (
+              <button
+                onClick={() => setShowStorageGuide(true)}
+                className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-400/40 flex items-center gap-1 transition-colors cursor-pointer"
+                title="스토리지 상태 확인"
+              >
+                <span>📦 스토리지: {storageMode}</span>
+              </button>
+            )}
+          </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             부스 이벤트 참여 현황 관리 및 50명 랜덤 추첨기
           </p>
@@ -288,6 +303,63 @@ export default function AdminDashboard({ token, onLogout }) {
           />
         )}
       </div>
+
+      {/* Vercel 스토리지 설정 안내 모달 */}
+      {showStorageGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg bg-slate-900 border-2 border-indigo-500/50 rounded-3xl p-6 sm:p-8 shadow-2xl text-slate-100 animate-scale-up">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <h3 className="text-xl font-black text-white flex items-center gap-2">
+                <span>📦 스토리지 연동 상태 및 안내</span>
+              </h3>
+              <button
+                onClick={() => setShowStorageGuide(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs sm:text-sm">
+              <div className="p-3 rounded-xl bg-slate-800 border border-slate-700">
+                <span className="text-xs text-slate-400">현재 활성화된 저장소:</span>
+                <p className="text-base font-black text-amber-400 mt-0.5">{storageMode}</p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-bold text-white">🌐 Vercel에서 영구 저장을 유지하는 방법 (택 1)</h4>
+                
+                <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30">
+                  <span className="font-bold text-indigo-300">방법 A: Vercel KV / Upstash (권장, 원클릭)</span>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Vercel 대시보드 → 프로젝트의 <strong>Storage</strong> 탭 → <strong>Create KV Database</strong> 생성 후 연결하면 환경변수가 자동 등록되어 즉시 초고속 영구 저장소로 작동합니다.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30">
+                  <span className="font-bold text-emerald-300">방법 B: GitHub 토큰 등록 (무료, 무설치)</span>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Vercel 대시보드 → <strong>Settings → Environment Variables</strong>에 다음 2개를 등록하면 GitHub 레포에 자동 커밋되어 영구 보존됩니다:
+                  </p>
+                  <code className="block mt-1.5 p-2 bg-slate-950 rounded text-emerald-400 font-mono text-[11px]">
+                    GITHUB_TOKEN: 본인의 GitHub Personal Access Token<br />
+                    GITHUB_REPO: University-Supporters/Random-Chance
+                  </code>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <button
+                onClick={() => setShowStorageGuide(false)}
+                className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow transition-all"
+              >
+                확인 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
