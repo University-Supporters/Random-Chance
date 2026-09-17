@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Trophy, Shield, LogOut, RefreshCw, BarChart3 } from 'lucide-react';
+import { Users, Trophy, Shield, LogOut, RefreshCw, BarChart3, Trash2 } from 'lucide-react';
 import ParticipantList from './ParticipantList';
 import RaffleDrawer from './RaffleDrawer';
 import AuditLogs from './AuditLogs';
@@ -140,6 +140,31 @@ export default function AdminDashboard({ token, onLogout }) {
     }
   };
 
+  // 모든 데이터 전체 초기화 (참여자, 감사로그 일괄 삭제)
+  const handleResetAll = async () => {
+    if (!confirm('⚠️ 경고: 모든 참여자 명단, 당첨자 내역, 감사 로그가 영구 삭제됩니다.\n정말로 모든 데이터를 전체 초기화하시겠습니까?')) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/reset-all', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setParticipants([]);
+        setWinners([]);
+        setLogs([]);
+        showToast('모든 참여자 명단 및 감사 로그가 초기화되었습니다.');
+        fetchData();
+      } else {
+        alert(data.message || '초기화 실패');
+      }
+    } catch (err) {
+      alert('전체 초기화 중 오류가 발생했습니다.');
+    }
+  };
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in">
       {/* 알림 토스트 */}
@@ -182,6 +207,14 @@ export default function AdminDashboard({ token, onLogout }) {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>새로고침</span>
+          </button>
+          <button
+            onClick={handleResetAll}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-bold border border-red-500/30 transition-colors cursor-pointer"
+            title="모든 참여자 명단 및 감사 로그 일괄 초기화"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>데이터 전체 초기화</span>
           </button>
           <button
             onClick={onLogout}

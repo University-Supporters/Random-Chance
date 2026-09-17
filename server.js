@@ -353,6 +353,26 @@ router.post('/admin/reset-draw', authMiddleware, async (req, res) => {
   }
 });
 
+// 10. 모든 데이터 전체 초기화 (참여자, 당첨자, 감사로그 일괄 삭제)
+router.post('/admin/reset-all', authMiddleware, async (req, res) => {
+  try {
+    const cleanDb = {
+      participants: [],
+      logs: [],
+      winners: [],
+      settings: {
+        drawCount: 50,
+        allowDuplicatePhone: false,
+        allowDuplicateStudentId: false,
+      }
+    };
+    await saveDbData(cleanDb);
+    res.json({ success: true, message: '모든 참여자 명단 및 감사 로그가 성공적으로 초기화되었습니다.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '초기화 실패' });
+  }
+});
+
 // 10. 스토리지 및 시스템 상태 정보
 router.get('/admin/system', authMiddleware, (req, res) => {
   res.json({
