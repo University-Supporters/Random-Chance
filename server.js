@@ -117,7 +117,6 @@ router.post('/participants', async (req, res) => {
       name: cleanName,
       phone: phone.trim(),
       phoneClean: cleanPhone,
-      operator: deviceOperator,
       createdAt: new Date().toISOString(),
       ip: clientIp,
     };
@@ -128,9 +127,9 @@ router.post('/participants', async (req, res) => {
     // 감사 로그 기록
     await addAuditLog(
       'PARTICIPANT_REGISTER',
-      `신규 참가자 등록: ${cleanName} (${cleanStudentId}, ${cleanPhone.slice(0, 3)}-****-${cleanPhone.slice(-4)}) [단말기: ${deviceOperator}]`,
+      `신규 참가자 등록: ${cleanName} (${cleanStudentId}, ${cleanPhone.slice(0, 3)}-****-${cleanPhone.slice(-4)})`,
       clientIp,
-      `사용자 (${deviceOperator} 단말기)`
+      '부스 참가자'
     );
 
     res.status(201).json({

@@ -4,7 +4,7 @@ import { formatPhoneNumber } from '../lib/utils';
 import ConfirmModal from './ConfirmModal';
 import PrivacyModal from './PrivacyModal';
 
-export default function UserForm({ onSuccess, operator }) {
+export default function UserForm({ onSuccess }) {
   const [formData, setFormData] = useState({
     studentId: '',
     name: '',
@@ -68,7 +68,7 @@ export default function UserForm({ onSuccess, operator }) {
       const res = await fetch('/api/participants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, operator }),
+        body: JSON.stringify(formData),
       });
 
       const data = await res.json();
