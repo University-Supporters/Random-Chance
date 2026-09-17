@@ -24,13 +24,26 @@ app.use((req, res, next) => {
   next();
 });
 
-// IP 추출 헬퍼
+// IP 추출 및 정규화 헬퍼 (Vercel 및 로컬 IPv6 대응)
 function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    return forwarded.split(',')[0].trim();
+  let ip = req.headers['x-real-ip'] || 
+           (req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : null) || 
+           req.headers['cf-connecting-ip'] ||
+           req.socket?.remoteAddress || 
+           req.ip || 
+           '127.0.0.1';
+
+  // IPv6 매핑 IPv4 형식 정규화 (::ffff:192.168.0.1 -> 192.168.0.1)
+  if (ip && ip.startsWith('::ffff:')) {
+    ip = ip.replace('::ffff:', '');
   }
-  return req.socket.remoteAddress || req.ip || '127.0.0.1';
+
+  // 로컬 루프백 표기 친화적 정규화
+  if (ip === '::1' || ip === '127.0.0.1') {
+    return '127.0.0.1 (로컬)';
+  }
+
+  return ip;
 }
 
 // 관리자 인증 미들웨어
