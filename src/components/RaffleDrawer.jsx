@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Gift, Sparkles, Trophy, Download, Copy, RotateCcw, AlertTriangle, Check, Users } from 'lucide-react';
+import { Gift, Sparkles, Trophy, Download, Copy, RotateCcw, AlertTriangle, Check, Users, ExternalLink } from 'lucide-react';
+import InstagramIcon from './InstagramIcon';
 import { exportToCSV, formatDateTime } from '../lib/utils';
 
 export default function RaffleDrawer({ 
@@ -77,13 +78,13 @@ export default function RaffleDrawer({
     }, 80);
   };
 
-  // 클립보드 복사
+  // 클립보드 복사 (인스타그램 아이디 포함)
   const handleCopyClipboard = () => {
     if (winners.length === 0) return;
     const text = [
       `🎁 [인권 서포터즈 혜윰] 축제 부스 GS25 1만원권 당첨자 명단 (총 ${winners.length}명) 🎁`,
       '',
-      ...winners.map((w, i) => `${i + 1}. [${w.studentId}] ${w.name} (${w.phone.slice(0, 3)}-****-${w.phone.slice(-4)})`)
+      ...winners.map((w, i) => `${i + 1}. [${w.studentId}] ${w.name} (${w.phone.slice(0, 3)}-****-${w.phone.slice(-4)}) | 인스타: ${w.instagram || '없음'}`)
     ].join('\n');
 
     navigator.clipboard.writeText(text);
@@ -91,15 +92,16 @@ export default function RaffleDrawer({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // CSV 다운로드
+  // CSV 다운로드 (인스타그램 아이디 열 포함)
   const handleDownloadCSV = () => {
     if (winners.length === 0) return;
-    const headers = ['당첨순위', '학번', '이름', '전화번호', '참여일시', '추첨일시'];
+    const headers = ['당첨순위', '학번', '이름', '전화번호', '인스타그램', '참여일시', '추첨일시'];
     const rows = winners.map((w, idx) => [
       idx + 1,
       w.studentId,
       w.name,
       w.phone,
+      w.instagram || '없음',
       formatDateTime(w.createdAt),
       formatDateTime(w.wonAt)
     ]);
@@ -224,6 +226,23 @@ export default function RaffleDrawer({
                     {w.phone}
                   </p>
                 </div>
+                {w.instagram && w.instagram !== '없음' ? (
+                  <a
+                    href={`https://instagram.com/${w.instagram.replace(/^@/, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2.5 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-pink-500/15 text-pink-300 border border-pink-500/30 hover:bg-pink-500/25 hover:border-pink-500/50 transition-all w-fit"
+                    title={`${w.name}님의 인스타 열기 (팔로우 확인)`}
+                  >
+                    <InstagramIcon className="w-3 h-3 text-pink-400" />
+                    <span>{w.instagram}</span>
+                    <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                  </a>
+                ) : (
+                  <span className="mt-2.5 text-[10px] text-slate-500 font-medium px-2 py-0.5 rounded bg-slate-900 border border-slate-700/60 w-fit">
+                    인스타 없음
+                  </span>
+                )}
               </div>
             ))}
           </div>

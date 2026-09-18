@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { GraduationCap, User, Phone, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import InstagramIcon from './InstagramIcon';
 import { formatPhoneNumber } from '../lib/utils';
 import ConfirmModal from './ConfirmModal';
 import PrivacyModal from './PrivacyModal';
@@ -9,7 +10,9 @@ export default function UserForm({ onSuccess }) {
     studentId: '',
     name: '',
     phone: '',
+    instagram: '',
   });
+  const [noInstagram, setNoInstagram] = useState(false);
 
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -34,6 +37,20 @@ export default function UserForm({ onSuccess }) {
     setErrorMessage('');
   };
 
+  const handleInstagramChange = (e) => {
+    setFormData(prev => ({ ...prev, instagram: e.target.value }));
+    setErrorMessage('');
+  };
+
+  const handleToggleNoInstagram = (e) => {
+    const checked = e.target.checked;
+    setNoInstagram(checked);
+    if (checked) {
+      setFormData(prev => ({ ...prev, instagram: '' }));
+    }
+    setErrorMessage('');
+  };
+
   const handleFirstCheck = (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -52,6 +69,10 @@ export default function UserForm({ onSuccess }) {
       setErrorMessage('올바른 휴대폰 번호를 입력해 주세요.');
       return;
     }
+    if (!noInstagram && !formData.instagram.trim()) {
+      setErrorMessage('인스타그램 아이디를 입력하시거나 [계정 없음]을 체크해 주세요.');
+      return;
+    }
     if (!agreeTerms) {
       setErrorMessage('개인정보 수집 및 이용에 동의해 주세요.');
       return;
@@ -64,11 +85,18 @@ export default function UserForm({ onSuccess }) {
     setIsSubmitting(true);
     setErrorMessage('');
 
+    const formattedInstagram = noInstagram 
+      ? '없음' 
+      : (formData.instagram.trim() ? `@${formData.instagram.trim().replace(/^@/, '')}` : '없음');
+
     try {
       const res = await fetch('/api/participants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          instagram: formattedInstagram,
+        }),
       });
 
       const data = await res.json();
@@ -90,31 +118,31 @@ export default function UserForm({ onSuccess }) {
   return (
     <div className="w-full max-w-md mx-auto my-auto">
       {/* 컴팩트 헤딩 (스크롤 방지를 위한 최적화) */}
-      <div className="text-center mb-4 sm:mb-5">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold mb-2">
+      <div className="text-center mb-3 sm:mb-4">
+        <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold mb-1.5">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
           <span>2026 축제 부스 이벤트</span>
         </div>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
           GS25 1만원권 <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-orange-400">50명 추첨</span>
         </h2>
-        <p className="mt-1 text-slate-400 text-xs sm:text-sm font-medium">
+        <p className="mt-0.5 text-slate-400 text-xs sm:text-sm font-medium">
           정보를 입력하고 행운의 상품권에 도전하세요!
         </p>
       </div>
 
       {/* 모던 슬릭 글래스 카드 */}
-      <div className="glass-panel rounded-3xl p-5 sm:p-6 shadow-2xl">
+      <div className="glass-panel rounded-3xl p-4 sm:p-5 shadow-2xl">
         {errorMessage && (
-          <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
+          <div className="mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
             <span>{errorMessage}</span>
           </div>
         )}
 
-        <form onSubmit={handleFirstCheck} className="space-y-3.5">
+        <form onSubmit={handleFirstCheck} className="space-y-3">
           {/* 학번 & 이름 (스크롤 방지를 위해 모바일에서도 2열 그리드로 정돈) */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1">
                 <GraduationCap className="w-3.5 h-3.5 text-indigo-400" /> 학번
@@ -127,7 +155,7 @@ export default function UserForm({ onSuccess }) {
                 placeholder="60241234"
                 maxLength={8}
                 required
-                className="modern-input w-full h-11 px-3.5 rounded-xl text-sm sm:text-base font-bold tracking-wider placeholder:text-slate-600"
+                className="modern-input w-full h-10 px-3 rounded-xl text-sm sm:text-base font-bold tracking-wider placeholder:text-slate-600"
               />
             </div>
 
@@ -142,7 +170,7 @@ export default function UserForm({ onSuccess }) {
                 placeholder="홍길동"
                 maxLength={20}
                 required
-                className="modern-input w-full h-11 px-3.5 rounded-xl text-sm sm:text-base font-bold placeholder:text-slate-600"
+                className="modern-input w-full h-10 px-3 rounded-xl text-sm sm:text-base font-bold placeholder:text-slate-600"
               />
             </div>
           </div>
@@ -163,13 +191,53 @@ export default function UserForm({ onSuccess }) {
               placeholder="010-1234-5678"
               maxLength={13}
               required
-              className="modern-input w-full h-11 px-3.5 rounded-xl text-sm sm:text-base font-bold tracking-wider placeholder:text-slate-600 font-mono"
+              className="modern-input w-full h-10 px-3 rounded-xl text-sm sm:text-base font-bold tracking-wider placeholder:text-slate-600 font-mono"
             />
           </div>
 
+          {/* 인스타그램 아이디 & 계정 없음 토글 */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                <InstagramIcon className="w-3.5 h-3.5 text-pink-400" /> 인스타그램 아이디
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={noInstagram}
+                  onChange={handleToggleNoInstagram}
+                  className="w-3.5 h-3.5 rounded text-indigo-600 border-slate-700 bg-slate-900 cursor-pointer"
+                />
+                <span className={`text-[11px] ${noInstagram ? 'text-indigo-400 font-bold' : 'text-slate-400'}`}>
+                  계정 없음
+                </span>
+              </label>
+            </div>
+            <div className="relative">
+              <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold ${noInstagram ? 'text-slate-600' : 'text-slate-400'}`}>
+                @
+              </span>
+              <input
+                type="text"
+                value={noInstagram ? '계정 없음 (인스타 미사용)' : formData.instagram}
+                onChange={handleInstagramChange}
+                disabled={noInstagram}
+                placeholder="hyeyum_official"
+                maxLength={30}
+                className={`modern-input w-full h-10 pl-7 pr-3 rounded-xl text-sm font-semibold placeholder:text-slate-600 transition-all ${
+                  noInstagram ? 'bg-slate-900/60 text-slate-500 border-slate-800 cursor-not-allowed italic' : ''
+                }`}
+              />
+            </div>
+            <p className="mt-1 text-[10px] text-slate-400 flex items-center justify-between">
+              <span>※ 당첨 시 서포터즈 인스타 팔로우 여부를 확인합니다.</span>
+              {noInstagram && <span className="text-amber-400 font-medium">※ 계정 없음으로 응모</span>}
+            </p>
+          </div>
+
           {/* 개인정보 동의 및 상세보기 버튼 */}
-          <div className="pt-1">
-            <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.05] transition-colors">
+          <div className="pt-0.5">
+            <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.05] transition-colors">
               <label className="flex items-center gap-2 cursor-pointer select-none flex-1 min-w-0">
                 <input
                   type="checkbox"
@@ -192,14 +260,14 @@ export default function UserForm({ onSuccess }) {
           </div>
 
           {/* 제출 버튼 */}
-          <div className="pt-1.5">
+          <div className="pt-1">
             <button
               type="submit"
-              className="w-full h-12 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-[0.99] text-white font-bold text-base shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-[0.99] text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <span>확인하기</span>
             </button>
-            <p className="text-center mt-2 text-[11px] text-slate-500 font-medium">
+            <p className="text-center mt-1.5 text-[10px] sm:text-[11px] text-slate-500 font-medium">
               확인을 누르면 입력 정보 검토 및 유의사항이 안내됩니다.
             </p>
           </div>
@@ -211,7 +279,10 @@ export default function UserForm({ onSuccess }) {
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
         onConfirm={handleFinalSubmit}
-        formData={formData}
+        formData={{
+          ...formData,
+          instagram: noInstagram ? '없음' : (formData.instagram.trim() ? `@${formData.instagram.trim().replace(/^@/, '')}` : '없음')
+        }}
         isSubmitting={isSubmitting}
       />
 

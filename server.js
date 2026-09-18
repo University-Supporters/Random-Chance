@@ -66,9 +66,8 @@ const router = express.Router();
 // 1. 참여자 등록 (사용자 페이지)
 router.post('/participants', async (req, res) => {
   try {
-    const { studentId, name, phone, operator } = req.body;
+    const { studentId, name, phone, instagram } = req.body;
     const clientIp = getClientIp(req);
-    const deviceOperator = operator ? operator.trim() : '미지정';
 
     if (!studentId || !name || !phone) {
       return res.status(400).json({ success: false, message: '학번, 이름, 전화번호를 모두 입력해주세요.' });
@@ -77,6 +76,12 @@ router.post('/participants', async (req, res) => {
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     const cleanStudentId = studentId.trim();
     const cleanName = name.trim();
+
+    let cleanInstagram = '없음';
+    if (instagram && typeof instagram === 'string' && instagram.trim() !== '' && instagram.trim() !== '없음') {
+      const raw = instagram.trim().replace(/^@/, '');
+      cleanInstagram = raw ? `@${raw}` : '없음';
+    }
 
     // 60xxxxxx 8자리 학번 양식 검증
     if (!/^60\d{6}$/.test(cleanStudentId)) {
@@ -117,6 +122,7 @@ router.post('/participants', async (req, res) => {
       name: cleanName,
       phone: phone.trim(),
       phoneClean: cleanPhone,
+      instagram: cleanInstagram,
       createdAt: new Date().toISOString(),
       ip: clientIp,
     };
@@ -127,7 +133,7 @@ router.post('/participants', async (req, res) => {
     // 감사 로그 기록
     await addAuditLog(
       'PARTICIPANT_REGISTER',
-      `신규 참가자 등록: ${cleanName} (${cleanStudentId}, ${cleanPhone.slice(0, 3)}-****-${cleanPhone.slice(-4)})`,
+      `신규 참가자 등록: ${cleanName} (${cleanStudentId}, ${cleanPhone.slice(0, 3)}-****-${cleanPhone.slice(-4)}) [인스타: ${cleanInstagram}]`,
       clientIp,
       '부스 참가자'
     );
@@ -188,7 +194,7 @@ router.get('/admin/participants', authMiddleware, async (req, res) => {
 // 4. 관리자 수동 참여자 추가
 router.post('/admin/participants', authMiddleware, async (req, res) => {
   try {
-    const { studentId, name, phone } = req.body;
+    const { studentId, name, phone, instagram } = req.body;
     const clientIp = getClientIp(req);
 
     if (!studentId || !name || !phone) {
@@ -203,6 +209,12 @@ router.post('/admin/participants', authMiddleware, async (req, res) => {
       });
     }
 
+    let cleanInstagram = '없음';
+    if (instagram && typeof instagram === 'string' && instagram.trim() !== '' && instagram.trim() !== '없음') {
+      const raw = instagram.trim().replace(/^@/, '');
+      cleanInstagram = raw ? `@${raw}` : '없음';
+    }
+
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     const db = await getDbData();
     if (!db.participants) db.participants = [];
@@ -213,6 +225,7 @@ router.post('/admin/participants', authMiddleware, async (req, res) => {
       name: name.trim(),
       phone: phone.trim(),
       phoneClean: cleanPhone,
+      instagram: cleanInstagram,
       createdAt: new Date().toISOString(),
       ip: `${clientIp} (운영진 수동 등록)`,
     };
@@ -222,7 +235,7 @@ router.post('/admin/participants', authMiddleware, async (req, res) => {
 
     await addAuditLog(
       'ADMIN_ADD_PARTICIPANT',
-      `운영진 수동 추가: ${newParticipant.name} (${newParticipant.studentId})`,
+      `운영진 수동 추가: ${newParticipant.name} (${newParticipant.studentId}) [인스타: ${cleanInstagram}]`,
       clientIp,
       '관리자'
     );

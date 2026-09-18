@@ -1,8 +1,11 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, X, User, Phone, GraduationCap } from 'lucide-react';
+import InstagramIcon from './InstagramIcon';
 
 export default function ConfirmModal({ isOpen, onClose, onConfirm, formData, isSubmitting }) {
   if (!isOpen) return null;
+
+  const isNoInstagram = !formData.instagram || formData.instagram === '없음';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
@@ -51,6 +54,21 @@ export default function ConfirmModal({ isOpen, onClose, onConfirm, formData, isS
             <span className="font-mono font-bold text-indigo-300 tracking-wider">
               {formData.phone}
             </span>
+          </div>
+
+          <div className="flex items-center justify-between text-xs sm:text-sm pt-2 border-t border-white/[0.04]">
+            <span className="flex items-center gap-1.5 text-slate-400 font-medium">
+              <InstagramIcon className="w-4 h-4 text-pink-400" /> 인스타그램
+            </span>
+            {isNoInstagram ? (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">
+                계정 없음 (인스타 미사용)
+              </span>
+            ) : (
+              <span className="font-mono font-bold text-pink-300 tracking-wider">
+                {formData.instagram}
+              </span>
+            )}
           </div>
         </div>
 

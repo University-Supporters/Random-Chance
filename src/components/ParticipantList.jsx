@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Search, Trash2, UserPlus, Download, RefreshCw, AlertCircle, X } from 'lucide-react';
+import { Search, Trash2, UserPlus, Download, RefreshCw, AlertCircle, X, ExternalLink } from 'lucide-react';
+import InstagramIcon from './InstagramIcon';
 import { formatDateTime, formatPhoneNumber, exportToCSV } from '../lib/utils';
 
 export default function ParticipantList({ 
@@ -11,7 +12,7 @@ export default function ParticipantList({
 }) {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newEntry, setNewEntry] = useState({ studentId: '', name: '', phone: '' });
+  const [newEntry, setNewEntry] = useState({ studentId: '', name: '', phone: '', instagram: '' });
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [actionError, setActionError] = useState('');
@@ -21,14 +22,15 @@ export default function ParticipantList({
     return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
   });
 
-  // 필터링된 참여자 목록
+  // 필터링된 참여자 목록 (학번, 이름, 전화번호, 인스타그램 검색 지원)
   const filtered = sortedParticipants.filter((p) => {
     const q = search.toLowerCase().trim();
     if (!q) return true;
     return (
       (p.studentId && p.studentId.toLowerCase().includes(q)) ||
       (p.name && p.name.toLowerCase().includes(q)) ||
-      (p.phone && p.phone.includes(q))
+      (p.phone && p.phone.includes(q)) ||
+      (p.instagram && p.instagram.toLowerCase().includes(q))
     );
   });
 
@@ -37,17 +39,20 @@ export default function ParticipantList({
     e.preventDefault();
     setActionError('');
     if (!newEntry.studentId || !newEntry.name || !newEntry.phone) {
-      setActionError('모든 필드를 입력해주세요.');
+      setActionError('학번, 이름, 전화번호를 입력해주세요.');
       return;
     }
     if (!/^60\d{6}$/.test(newEntry.studentId.trim())) {
       setActionError('학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)');
       return;
     }
-    const success = await onAdd(newEntry);
+    const formattedInsta = newEntry.instagram.trim() 
+      ? `@${newEntry.instagram.trim().replace(/^@/, '')}` 
+      : '없음';
+    const success = await onAdd({ ...newEntry, instagram: formattedInsta });
     if (success) {
       setShowAddModal(false);
-      setNewEntry({ studentId: '', name: '', phone: '' });
+      setNewEntry({ studentId: '', name: '', phone: '', instagram: '' });
     }
   };
 
@@ -60,12 +65,13 @@ export default function ParticipantList({
 
   // CSV 내보내기 (최신순)
   const handleExportCSV = () => {
-    const headers = ['번호', '학번', '이름', '전화번호', '참여일시', '접속IP'];
+    const headers = ['번호', '학번', '이름', '전화번호', '인스타그램', '참여일시', '접속IP'];
     const rows = sortedParticipants.map((p, idx) => [
       idx + 1,
       p.studentId,
       p.name,
       p.phone,
+      p.instagram || '없음',
       formatDateTime(p.createdAt),
       p.ip || '-'
     ]);
@@ -125,6 +131,7 @@ export default function ParticipantList({
                 <th className="py-3.5 px-4">학번</th>
                 <th className="py-3.5 px-4">이름</th>
                 <th className="py-3.5 px-4">전화번호</th>
+                <th className="py-3.5 px-4">인스타그램</th>
                 <th className="py-3.5 px-4 hidden md:table-cell">참여일시</th>
                 <th className="py-3.5 px-4 hidden lg:table-cell">접속 IP</th>
                 <th className="py-3.5 px-4 text-right w-20">관리</th>
@@ -133,7 +140,7 @@ export default function ParticipantList({
             <tbody className="divide-y divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500 font-medium">
+                  <td colSpan={8} className="py-12 text-center text-slate-500 font-medium">
                     {search ? '검색 결과와 일치하는 참여자가 없습니다.' : '아직 등록된 참여자가 없습니다.'}
                   </td>
                 </tr>
@@ -151,6 +158,25 @@ export default function ParticipantList({
                     </td>
                     <td className="py-3 px-4 font-mono text-indigo-400">
                       {p.phone}
+                    </td>
+                    <td className="py-3 px-4">
+                      {p.instagram && p.instagram !== '없음' ? (
+                        <a
+                          href={`https://instagram.com/${p.instagram.replace(/^@/, '')}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-300 border border-pink-500/25 hover:bg-pink-500/20 hover:border-pink-500/40 transition-all group/link"
+                          title={`${p.name}님의 인스타그램 프로필 열기`}
+                        >
+                          <InstagramIcon className="w-3 h-3 text-pink-400" />
+                          <span>{p.instagram}</span>
+                          <ExternalLink className="w-2.5 h-2.5 opacity-60 group-hover/link:opacity-100" />
+                        </a>
+                      ) : (
+                        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 border border-slate-700/60">
+                          계정 없음
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 hidden md:table-cell text-xs text-slate-400">
                       {formatDateTime(p.createdAt)}
@@ -214,6 +240,7 @@ export default function ParticipantList({
                   value={newEntry.name}
                   onChange={(e) => setNewEntry({ ...newEntry, name: e.target.value })}
                   placeholder="예: 홍길동"
+                  maxLength={20}
                   required
                   className="w-full px-3 py-2 border rounded-xl text-sm"
                 />
@@ -226,6 +253,16 @@ export default function ParticipantList({
                   onChange={(e) => setNewEntry({ ...newEntry, phone: formatPhoneNumber(e.target.value) })}
                   placeholder="010-0000-0000"
                   required
+                  className="w-full px-3 py-2 border rounded-xl font-mono text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">인스타그램 아이디 (선택)</label>
+                <input
+                  type="text"
+                  value={newEntry.instagram}
+                  onChange={(e) => setNewEntry({ ...newEntry, instagram: e.target.value })}
+                  placeholder="@hyeyum 또는 비워둠"
                   className="w-full px-3 py-2 border rounded-xl font-mono text-sm"
                 />
               </div>
