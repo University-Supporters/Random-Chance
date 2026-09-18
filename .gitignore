@@ -57,3 +57,6 @@ Thumbs.db
 
 # Vercel
 .vercel
+
+# Server-only generated build assets
+.generated/
