@@ -17,9 +17,11 @@ export default function ParticipantList({
   const [deleteReason, setDeleteReason] = useState('');
   const [actionError, setActionError] = useState('');
 
-  // 최신 등록 순 정렬 (최신 입력자가 최상단에 노출)
+  // 최신 등록 순 정렬 (최신 입력자가 항상 최상단에 노출)
   const sortedParticipants = [...participants].sort((a, b) => {
-    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
+    const timeB = new Date(b.createdAt || b.timestamp || 0).getTime();
+    return timeB - timeA;
   });
 
   // 필터링된 참여자 목록 (학번, 이름, 전화번호, 인스타그램 검색 지원)

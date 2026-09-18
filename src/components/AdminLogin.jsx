@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiRequest } from '../lib/api';
 import { Lock, KeyRound, ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export default function AdminLogin({ onLoginSuccess, onCancel }) {
@@ -12,16 +13,7 @@ export default function AdminLogin({ onLoginSuccess, onCancel }) {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || '비밀번호가 올바르지 않습니다.');
-      }
+      const data = await apiRequest('/api/admin/login', { method: 'POST', body: { password } });
 
       onLoginSuccess(data.token);
     } catch (err) {

@@ -1,476 +1,173 @@
 import express from 'express';
-import cors from 'cors';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { getDbData, saveDbData, addAuditLog, getStorageMode } from './api/db.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomBytes, randomUUID, randomInt, createHmac, timingSafeEqual } from 'node:crypto';
+import { getDbData, updateDbData, appendAuditLog, addAuditLog, getStorageMode, createManualSnapshot, getAvailableSnapshots, restoreDbData, readSnapshot } from './api/db.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const root = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1111';
-const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '9372707';
-
-app.use(cors());
-app.use(express.json());
-
-// Vercel Serverless 요청 URL 정규화 미들웨어 (요청이 /api/... 또는 /... 로 들어올 때 모두 지원)
+const SUPER_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '9372707';
+const secret = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
+const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const fail = (status, message) => { const error = new Error(message); error.status = status; throw error; };
+const ip = req => req.ip || req.socket.remoteAddress || 'unknown';
+app.disable('x-powered-by');
+app.disable('etag');
 app.use((req, res, next) => {
-  if (req.url.startsWith('/api/')) {
-    req.normalizedPath = req.url.slice(4); // '/api' 제거
-  } else {
-    req.normalizedPath = req.url;
-  }
+  res.set({ 'Cache-Control': 'no-store, no-cache, must-revalidate, private', Pragma: 'no-cache', Expires: '0', 'X-Content-Type-Options': 'nosniff' });
   next();
 });
-
-// IP 추출 및 정규화 헬퍼 (Vercel 및 로컬 IPv6 대응)
-function getClientIp(req) {
-  let ip = req.headers['x-real-ip'] || 
-           (req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : null) || 
-           req.headers['cf-connecting-ip'] ||
-           req.socket?.remoteAddress || 
-           req.ip || 
-           '127.0.0.1';
-
-  // IPv6 매핑 IPv4 형식 정규화 (::ffff:192.168.0.1 -> 192.168.0.1)
-  if (ip && ip.startsWith('::ffff:')) {
-    ip = ip.replace('::ffff:', '');
-  }
-
-  // 로컬 루프백 표기 친화적 정규화
-  if (ip === '::1' || ip === '127.0.0.1') {
-    return '127.0.0.1 (로컬)';
-  }
-
-  return ip;
+app.use(express.json({ limit: '10mb' }));
+function sign(value) { return createHmac('sha256', secret).update(value).digest('base64url'); }
+function issueToken(role, session) {
+  const payload = Buffer.from(JSON.stringify({ role, session, exp: Date.now() + (role === 'super' ? 30 * 60000 : 8 * 3600000) })).toString('base64url');
+  return `${payload}.${sign(payload)}`;
 }
-
-// 1차 일반 관리자 인증 미들웨어 (기본 비밀번호: 1111)
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ success: false, message: '관리자 인증 토큰이 필요합니다.' });
-  }
-  const token = authHeader.replace(/^Bearer\s+/i, '');
-  if (token !== ADMIN_PASSWORD && token !== SUPER_ADMIN_PASSWORD) {
-    return res.status(403).json({ success: false, message: '유효하지 않은 관리자 비밀번호입니다.' });
-  }
+function verifyToken(token, role) {
+  if (typeof token !== 'string' || token.length > 2048) return null;
+  const [payload, signature, extra] = token.split('.');
+  if (!payload || !signature || extra) return null;
+  const expected = Buffer.from(sign(payload)), actual = Buffer.from(signature);
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+  try { const data = JSON.parse(Buffer.from(payload, 'base64url').toString()); return data.role === role && data.exp > Date.now() ? data : null; } catch { return null; }
+}
+export function authMiddleware(req, res, next) {
+  const match = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
+  req.auth = verifyToken(match?.[1], 'admin');
+  if (!req.auth) return res.status(401).json({ success: false, message: '관리자 인증이 만료되었습니다. 다시 로그인해 주세요.' });
   next();
 }
-
-// 2차 상급 관리자 인증 미들웨어 (비밀번호: 9372707)
-function superAuthMiddleware(req, res, next) {
-  const superToken = req.headers['x-super-token'] || 
-                     (req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, '')) ||
-                     (req.body && req.body.superPassword);
-                     
-  if (!superToken || superToken !== SUPER_ADMIN_PASSWORD) {
-    return res.status(403).json({ 
-      success: false, 
-      message: '상급 관리자 인증이 필요합니다. (비밀번호 불일치)' 
-    });
-  }
+export function superAuthMiddleware(req, res, next) {
+  const auth = verifyToken(req.headers['x-super-token'], 'super');
+  if (!auth || auth.session !== req.auth.session) return res.status(403).json({ success: false, message: '상급 관리자 2차 인증이 필요합니다.' });
   next();
 }
-
-// 라우터 래퍼 (Express 라우트가 /api/xxx 와 /xxx 모두에 반응하도록 매핑)
+const attempts = new Map();
+function loginLimit(req, res, next) {
+  const now = Date.now();
+  for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key);
+  const key = `${ip(req)}:${req.path}`;
+  const value = attempts.get(key) || { count: 0, until: now + 60000 };
+  if (++value.count > 20) return res.status(429).json({ success: false, message: '인증 시도가 많습니다. 1분 후 다시 시도해 주세요.' });
+  attempts.set(key, value); next();
+}
 const router = express.Router();
-
-// 1. 참여자 등록 (사용자 페이지)
-router.post('/participants', async (req, res) => {
-  try {
-    const { studentId, name, phone, instagram } = req.body;
-    const clientIp = getClientIp(req);
-
-    if (!studentId || !name || !phone) {
-      return res.status(400).json({ success: false, message: '학번, 이름, 전화번호를 모두 입력해주세요.' });
-    }
-
-    const cleanPhone = phone.replace(/[^0-9]/g, '');
-    const cleanStudentId = studentId.trim();
-    const cleanName = name.trim();
-
-    let cleanInstagram = '없음';
-    if (instagram && typeof instagram === 'string' && instagram.trim() !== '' && instagram.trim() !== '없음') {
-      const raw = instagram.trim().replace(/^@/, '');
-      cleanInstagram = raw ? `@${raw}` : '없음';
-    }
-
-    // 60xxxxxx 8자리 학번 양식 검증
-    if (!/^60\d{6}$/.test(cleanStudentId)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)' 
-      });
-    }
-
-    if (cleanPhone.length < 10 || cleanPhone.length > 11) {
-      return res.status(400).json({ success: false, message: '올바른 전화번호 10~11자리를 입력해주세요.' });
-    }
-
-    const db = await getDbData();
-    if (!db.participants) db.participants = [];
-
-    // 중복 체크
-    const existingPhone = db.participants.find(p => p.phoneClean === cleanPhone);
-    if (existingPhone) {
-      return res.status(409).json({ 
-        success: false, 
-        message: '이미 해당 전화번호로 참여하신 내역이 있습니다. (1인 1회 참여)' 
-      });
-    }
-
-    const existingStudentId = db.participants.find(p => p.studentId === cleanStudentId);
-    if (existingStudentId) {
-      return res.status(409).json({ 
-        success: false, 
-        message: '이미 해당 학번으로 참여하신 내역이 있습니다. (1인 1회 참여)' 
-      });
-    }
-
-    // 신규 등록
-    const newParticipant = {
-      id: 'p_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      studentId: cleanStudentId,
-      name: cleanName,
-      phone: phone.trim(),
-      phoneClean: cleanPhone,
-      instagram: cleanInstagram,
-      createdAt: new Date().toISOString(),
-      ip: clientIp,
-    };
-
-    db.participants.push(newParticipant);
-    await saveDbData(db);
-
-    // 감사 로그 기록
-    await addAuditLog(
-      'PARTICIPANT_REGISTER',
-      `신규 참가자 등록: ${cleanName} (${cleanStudentId}, ${cleanPhone.slice(0, 3)}-****-${cleanPhone.slice(-4)}) [인스타: ${cleanInstagram}]`,
-      clientIp,
-      '부스 참가자'
-    );
-
-    res.status(201).json({
-      success: true,
-      message: '이벤트 응모가 성공적으로 완료되었습니다!',
-      data: {
-        id: newParticipant.id,
-        name: newParticipant.name,
-        createdAt: newParticipant.createdAt
-      }
-    });
-  } catch (err) {
-    console.error('Participant register error:', err);
-    res.status(500).json({ success: false, message: '서버 내부 오류가 발생했습니다.' });
-  }
-});
-
-// 2. 관리자 로그인
-router.post('/admin/login', async (req, res) => {
-  const { password } = req.body;
-  const clientIp = getClientIp(req);
-
-  if (password === ADMIN_PASSWORD) {
-    await addAuditLog('ADMIN_LOGIN_SUCCESS', '관리자 대시보드 로그인 성공', clientIp, '관리자');
-    return res.json({ 
-      success: true, 
-      token: ADMIN_PASSWORD,
-      message: '관리자 인증 성공' 
-    });
-  } else {
-    await addAuditLog('ADMIN_LOGIN_FAIL', '관리자 로그인 시도 실패 (비밀번호 불일치)', clientIp, '미승인');
-    return res.status(401).json({ 
-      success: false, 
-      message: '비밀번호가 올바르지 않습니다.' 
-    });
-  }
-});
-
-// 3. 관리자 참여자 목록 및 통계 조회 (최신 등록순)
-router.get('/admin/participants', authMiddleware, async (req, res) => {
-  try {
-    const db = await getDbData();
-    const sorted = [...(db.participants || [])].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    res.json({
-      success: true,
-      totalCount: (db.participants || []).length,
-      participants: sorted,
-      winners: db.winners || [],
-      storageMode: getStorageMode()
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '데이터 조회 실패' });
-  }
-});
-
-// 4. 관리자 수동 참여자 추가
-router.post('/admin/participants', authMiddleware, async (req, res) => {
-  try {
-    const { studentId, name, phone, instagram } = req.body;
-    const clientIp = getClientIp(req);
-
-    if (!studentId || !name || !phone) {
-      return res.status(400).json({ success: false, message: '모든 필드를 입력해주세요.' });
-    }
-
-    const cleanStudentId = studentId.trim();
-    if (!/^60\d{6}$/.test(cleanStudentId)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '학번은 60으로 시작하는 8자리 숫자여야 합니다. (예: 60241234)' 
-      });
-    }
-
-    let cleanInstagram = '없음';
-    if (instagram && typeof instagram === 'string' && instagram.trim() !== '' && instagram.trim() !== '없음') {
-      const raw = instagram.trim().replace(/^@/, '');
-      cleanInstagram = raw ? `@${raw}` : '없음';
-    }
-
-    const cleanPhone = phone.replace(/[^0-9]/g, '');
-    const db = await getDbData();
-    if (!db.participants) db.participants = [];
-
-    const newParticipant = {
-      id: 'p_admin_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      studentId: cleanStudentId,
-      name: name.trim(),
-      phone: phone.trim(),
-      phoneClean: cleanPhone,
-      instagram: cleanInstagram,
-      createdAt: new Date().toISOString(),
-      ip: `${clientIp} (운영진 수동 등록)`,
-    };
-
-    db.participants.push(newParticipant);
-    await saveDbData(db);
-
-    await addAuditLog(
-      'ADMIN_ADD_PARTICIPANT',
-      `운영진 수동 추가: ${newParticipant.name} (${newParticipant.studentId}) [인스타: ${cleanInstagram}]`,
-      clientIp,
-      '관리자'
-    );
-
-    res.status(201).json({ success: true, participant: newParticipant });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '수동 추가 실패' });
-  }
-});
-
-// 5. 관리자 참여자 삭제
-router.delete('/admin/participants/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason = '운영진에 의한 삭제' } = req.body || {};
-    const clientIp = getClientIp(req);
-
-    const db = await getDbData();
-    if (!db.participants) db.participants = [];
-
-    const targetIndex = db.participants.findIndex(p => p.id === id);
-    if (targetIndex === -1) {
-      return res.status(404).json({ success: false, message: '해당 참가자를 찾을 수 없습니다.' });
-    }
-
-    const removed = db.participants.splice(targetIndex, 1)[0];
-    if (db.winners) {
-      db.winners = db.winners.filter(w => w.id !== id);
-    }
-    await saveDbData(db);
-
-    await addAuditLog(
-      'ADMIN_DELETE_PARTICIPANT',
-      `참가자 삭제: ${removed.name} (${removed.studentId}, ${removed.phone}) - 사유: ${reason}`,
-      clientIp,
-      '관리자'
-    );
-
-    res.json({ success: true, message: '삭제되었습니다.', removed });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '삭제 실패' });
-  }
-});
-
-// 6. 상급 관리자 인증 검증 라우트 (비밀번호: 9372707)
-router.post('/admin/super-auth', authMiddleware, (req, res) => {
-  const { superPassword } = req.body || {};
-  if (superPassword === SUPER_ADMIN_PASSWORD) {
-    return res.json({ 
-      success: true, 
-      message: '상급 관리자 인증 성공',
-      superToken: SUPER_ADMIN_PASSWORD 
-    });
-  }
-  return res.status(403).json({ 
-    success: false, 
-    message: '상급 관리자 비밀번호가 일치하지 않습니다.' 
-  });
-});
-
-// 7. 관리자 감사 로그 목록 조회 (상급 관리자 전용)
-router.get('/admin/logs', authMiddleware, superAuthMiddleware, async (req, res) => {
-  try {
-    const db = await getDbData();
-    res.json({
-      success: true,
-      logs: db.logs || []
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '로그 조회 실패' });
-  }
-});
-
-// 8. 50명 랜덤 추첨 실행 (상급 관리자 전용)
-router.post('/admin/draw', authMiddleware, superAuthMiddleware, async (req, res) => {
-  try {
-    const { count = 50 } = req.body;
-    const clientIp = getClientIp(req);
-    const db = await getDbData();
-
-    if (!db.participants || db.participants.length === 0) {
-      return res.status(400).json({ success: false, message: '참여자가 없습니다.' });
-    }
-
-    const pool = [...db.participants];
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-
-    const drawCount = Math.min(count, pool.length);
-    const selectedWinners = pool.slice(0, drawCount).map((p, index) => ({
-      ...p,
-      rank: index + 1,
-      wonAt: new Date().toISOString()
-    }));
-
-    db.winners = selectedWinners;
-    await saveDbData(db);
-
-    await addAuditLog(
-      'RAFFLE_DRAW',
-      `랜덤 추첨 진행: 총 ${pool.length}명 중 ${drawCount}명 당첨자 선발 완료 (상급 관리자 인증)`,
-      clientIp,
-      '상급 관리자'
-    );
-
-    res.json({
-      success: true,
-      message: `${drawCount}명의 당첨자가 추첨되었습니다.`,
-      winners: selectedWinners
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '추첨 실행 실패' });
-  }
-});
-
-// 9. 당첨자 목록 조회
-router.get('/admin/winners', authMiddleware, async (req, res) => {
-  try {
-    const db = await getDbData();
-    res.json({
-      success: true,
-      winners: db.winners || []
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '당첨자 조회 실패' });
-  }
-});
-
-// 10. 추첨 결과 초기화 (상급 관리자 전용)
-router.post('/admin/reset-draw', authMiddleware, superAuthMiddleware, async (req, res) => {
-  try {
-    const clientIp = getClientIp(req);
-    const db = await getDbData();
-    db.winners = [];
-    await saveDbData(db);
-
-    await addAuditLog('RAFFLE_RESET', '추첨 당첨자 명단 초기화 (상급 관리자)', clientIp, '상급 관리자');
-
-    res.json({ success: true, message: '추첨 결과가 초기화되었습니다.' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '초기화 실패' });
-  }
-});
-
-// 11. 모든 데이터 전체 초기화 (상급 관리자 전용)
-router.post('/admin/reset-all', authMiddleware, superAuthMiddleware, async (req, res) => {
-  try {
-    const clientIp = getClientIp(req);
-    const cleanDb = {
-      participants: [],
-      logs: [],
-      winners: [],
-      settings: {
-        drawCount: 50,
-        allowDuplicatePhone: false,
-        allowDuplicateStudentId: false,
-      }
-    };
-    await saveDbData(cleanDb);
-
-    await addAuditLog(
-      'DATA_RESET_ALL',
-      '전체 데이터 및 감사 로그 일괄 초기화 수행',
-      clientIp,
-      '상급 관리자'
-    );
-
-    res.json({ success: true, message: '모든 참여자 명단 및 감사 로그가 성공적으로 초기화되었습니다.' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: '초기화 실패' });
-  }
-});
-
-// 10. 스토리지 및 시스템 상태 정보
-router.get('/admin/system', authMiddleware, (req, res) => {
-  res.json({
-    success: true,
-    storageMode: getStorageMode(),
-    environment: process.env.VERCEL ? 'Vercel Serverless' : 'Local / Docker Node Server',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 헬스체크
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', storageMode: getStorageMode(), timestamp: new Date().toISOString() });
-});
-
-// 라우터를 /api 와 루트 양쪽에 마운트
-app.use('/api', router);
-app.use('/', router);
-
-// 프로덕션 빌드 정적 서빙 (캐시 방지 헤더 적용)
-const distPath = path.resolve(__dirname, 'dist');
-app.use(express.static(distPath, {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    }
-  }
+router.post('/admin/login', loginLimit, asyncRoute(async (req,res) => {
+  const ok = req.body?.password === ADMIN_PASSWORD;
+  await addAuditLog(ok ? 'ADMIN_LOGIN_SUCCESS' : 'ADMIN_LOGIN_FAIL', ok ? '관리자 로그인 성공' : '관리자 로그인 실패', ip(req), '관리자');
+  if (!ok) fail(401, '비밀번호가 올바르지 않습니다.');
+  res.json({ success: true, token: issueToken('admin', randomUUID()) });
 }));
-
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api')) {
-    return res.status(404).json({ error: 'API route not found' });
-  }
-  const indexHtml = path.join(distPath, 'index.html');
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-  res.sendFile(indexHtml);
-});
-
-if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`[서버 구동] 포트 ${PORT}에서 축제 부스 상품권 서버가 실행 중입니다.`);
-    console.log(`스토리지 모드: ${getStorageMode()}`);
-    console.log(`관리자 기본 비밀번호: ${ADMIN_PASSWORD}`);
-    console.log(`상급 관리자 비밀번호: ${SUPER_ADMIN_PASSWORD}`);
-  });
+router.post('/admin/super-auth', authMiddleware, loginLimit, asyncRoute(async (req,res) => {
+  const ok = req.body?.superPassword === SUPER_PASSWORD;
+  await addAuditLog(ok ? 'SUPER_LOGIN_SUCCESS' : 'SUPER_LOGIN_FAIL', ok ? '상급 관리자 인증 성공' : '상급 관리자 인증 실패', ip(req), '관리자');
+  if (!ok) fail(403, '상급 관리자 비밀번호가 일치하지 않습니다.');
+  res.json({ success: true, superToken: issueToken('super', req.auth.session) });
+}));
+function participantInput(body) {
+  if (!body || ['studentId','name','phone'].some(key => typeof body[key] !== 'string')) fail(400, '학번, 이름, 전화번호를 입력해 주세요.');
+  const studentId = body.studentId.trim(), name = body.name.trim(), phone = body.phone.trim();
+  if (!/^60\d{6}$/.test(studentId)) fail(400, '학번은 60으로 시작하는 8자리 숫자여야 합니다.');
+  if (!name || name.length > 20) fail(400, '이름은 1~20자로 입력해 주세요.');
+  const phoneClean = phone.replace(/[^0-9]/g, '');
+  if (!/^[\d\s()+-]+$/.test(phone) || !/^\d{10,11}$/.test(phoneClean)) fail(400, '전화번호는 10~11자리 숫자로 입력해 주세요.');
+  if (typeof body.instagram !== 'string') fail(400, '인스타그램 아이디 또는 계정 없음을 선택해 주세요.');
+  const raw = body.instagram.trim().replace(/^@+/, '');
+  const instagram = body.noInstagram === true || raw === '없음' ? '없음' : `@${raw}`;
+  if (instagram !== '없음' && !/^[A-Za-z0-9._]{1,30}$/.test(raw)) fail(400, '올바른 인스타그램 아이디를 입력해 주세요.');
+  return { studentId, name, phone, phoneClean, instagram };
 }
-
+const register = manual => asyncRoute(async (req,res) => {
+  const entry = participantInput(req.body);
+  const participant = await updateDbData(db => {
+    if (db.participants.some(p => p.studentId === entry.studentId || p.phoneClean === entry.phoneClean)) fail(409, '이미 등록된 학번 또는 전화번호입니다. (1인 1회 응모)');
+    const participant = { ...entry, id: `p_${randomUUID()}`, createdAt: new Date().toISOString(), ip: ip(req) };
+    db.participants.push(participant);
+    appendAuditLog(db, manual ? 'ADMIN_ADD_PARTICIPANT' : 'PARTICIPANT_REGISTER', `${manual ? '수동' : '신규'} 등록: ${entry.name} (${entry.studentId})`, ip(req), manual ? '관리자' : '부스 참가자');
+    return participant;
+  });
+  res.status(201).json({ success: true, ...(manual ? { participant } : { data: { id: participant.id, name: participant.name, createdAt: participant.createdAt } }) });
+});
+router.post('/participants', register(false));
+// All admin routes below require first-stage authentication, including all backup routes.
+router.use('/admin', authMiddleware);
+router.get('/admin/participants', asyncRoute(async (req,res) => {
+  const db = await getDbData();
+  res.json({ success: true, totalCount: db.participants.length, participants: db.participants.sort((a,b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)), winners: db.winners, storageMode: getStorageMode() });
+}));
+router.post('/admin/participants', register(true));
+router.delete('/admin/participants/:id', asyncRoute(async (req,res) => {
+  await updateDbData(db => {
+    const participant = db.participants.find(p => p.id === req.params.id);
+    if (!participant) fail(404, '해당 참여자를 찾을 수 없습니다.');
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 300) : '운영진 삭제';
+    db.participants = db.participants.filter(p => p.id !== participant.id);
+    db.winners = db.winners.filter(p => p.id !== participant.id);
+    appendAuditLog(db, 'ADMIN_DELETE_PARTICIPANT', `${participant.name} (${participant.studentId}) 삭제: ${reason}`, ip(req), '관리자');
+  });
+  res.json({ success: true, message: '삭제되었습니다.' });
+}));
+router.get('/admin/system', (req,res) => res.json({ success: true, storageMode: getStorageMode(), timestamp: new Date().toISOString() }));
+// Second-stage boundary: no protected operation can bypass x-super-token.
+router.use('/admin', superAuthMiddleware);
+router.get('/admin/logs', asyncRoute(async (req,res) => res.json({ success: true, logs: (await getDbData()).logs })));
+router.get('/admin/winners', asyncRoute(async (req,res) => res.json({ success: true, winners: (await getDbData()).winners })));
+router.post('/admin/draw', asyncRoute(async (req,res) => {
+  if (req.body?.count !== undefined && req.body.count !== 50) fail(400, '추첨 인원은 50명입니다.');
+  const winners = await updateDbData(db => {
+    if (!db.participants.length) fail(400, '참여자가 없습니다.');
+    if (db.winners.length) fail(409, '이미 추첨이 완료되었습니다. 다시 추첨하려면 결과를 초기화해 주세요.');
+    const pool = [...db.participants];
+    for (let i = pool.length - 1; i > 0; i--) { const j = randomInt(i + 1); [pool[i],pool[j]] = [pool[j],pool[i]]; }
+    db.winners = pool.slice(0,50).map((p,i) => ({ ...p, rank: i+1, wonAt: new Date().toISOString() }));
+    appendAuditLog(db, 'RAFFLE_DRAW', `${pool.length}명 중 ${db.winners.length}명 추첨`, ip(req), '상급 관리자');
+    return db.winners;
+  });
+  res.json({ success: true, winners });
+}));
+router.post('/admin/reset-draw', asyncRoute(async (req,res) => {
+  await updateDbData(db => { db.winners = []; appendAuditLog(db, 'RAFFLE_RESET', '추첨 결과 초기화', ip(req), '상급 관리자'); });
+  res.json({ success: true });
+}));
+router.post('/admin/reset-all', asyncRoute(async (req,res) => {
+  await restoreDbData({ participants: [], winners: [], logs: [] }, '전체 초기화', { ip: ip(req) });
+  res.json({ success: true, message: '전체 데이터가 초기화되었습니다. 이전 상태는 스냅샷에 보관됩니다.' });
+}));
+router.get('/admin/backup/download', asyncRoute(async (req,res) => {
+  await addAuditLog('BACKUP_DOWNLOAD', '전체 DB 백업 다운로드', ip(req), '상급 관리자');
+  const db = await getDbData(); delete db._gh_sha;
+  res.attachment(`heyum_backup_${new Date().toISOString().slice(0,10)}.json`).json(db);
+}));
+// Read-only full snapshot used for Local Vault, without polluting the audit log on each poll.
+router.get('/admin/backup/vault', asyncRoute(async (req,res) => {
+  const db = await getDbData(); delete db._gh_sha; res.json({ success: true, db });
+}));
+router.get('/admin/backup/snapshots', (req,res) => res.json({ success: true, snapshots: getAvailableSnapshots() }));
+router.post('/admin/backup/snapshot', asyncRoute(async (req,res) => {
+  const snapshot = await createManualSnapshot();
+  await addAuditLog('BACKUP_SNAPSHOT_CREATE', `스냅샷 생성: ${snapshot.filename}`, ip(req), '상급 관리자');
+  res.json({ success: true, snapshot });
+}));
+router.post('/admin/backup/restore', asyncRoute(async (req,res) => {
+  const db = await restoreDbData(req.body?.backupData, '업로드 / 로컬 금고', { ip: ip(req) });
+  res.json({ success: true, message: `${db.participants.length}명 데이터 복원 완료`, participantCount: db.participants.length });
+}));
+router.post('/admin/backup/rollback-snapshot', asyncRoute(async (req,res) => {
+  const db = readSnapshot(req.body?.filename);
+  await restoreDbData(db, req.body.filename, { ip: ip(req) });
+  res.json({ success: true, message: '스냅샷 복원이 완료되었습니다.' });
+}));
+router.get('/health', (req,res) => res.json({ status: 'ok', storageMode: getStorageMode() }));
+app.use('/api', router);
+app.use('/', (req, res, next) => /^\/admin\/?$/.test(req.path) ? next() : router(req, res, next));
+app.use('/api', (req,res) => res.status(404).json({ success: false, message: 'API를 찾을 수 없습니다.' }));
+app.use(express.static(path.join(root, 'dist')));
+app.get('*', (req,res) => res.sendFile(path.join(root, 'dist/index.html')));
+app.use((err,req,res,next) => {
+  const status = err.type === 'entity.too.large' ? 413 : err.status || 500;
+  if (status >= 500) console.error('[API]', err.message);
+  res.status(status).json({ success: false, message: status === 413 ? '백업 파일은 10MB 이하여야 합니다.' : status >= 500 ? '저장 또는 조회에 실패했습니다. 연결과 저장소 상태를 확인해 주세요.' : err.type === 'entity.parse.failed' ? '올바른 JSON 데이터를 보내 주세요.' : err.message });
+});
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) app.listen(process.env.PORT || 3001, () => console.log('혜윰 부스 서버 실행 중'));
 export default app;

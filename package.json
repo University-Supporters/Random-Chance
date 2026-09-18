@@ -8,9 +8,9 @@
     "dev:frontend": "vite",
     "dev:backend": "node server.js",
     "build": "vite build",
-    "lint": "echo 'Linting passed'",
     "preview": "vite preview",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/integration.test.js"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

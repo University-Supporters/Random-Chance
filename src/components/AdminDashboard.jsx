@@ -1,21 +1,42 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Trophy, Shield, LogOut, RefreshCw, BarChart3, Lock, KeyRound, Crown, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  Users, 
+  Trophy, 
+  Shield, 
+  LogOut, 
+  RefreshCw, 
+  Lock,
+  KeyRound,
+  Crown,
+  X,
+  AlertTriangle,
+  HardDrive
+} from 'lucide-react';
+import { apiRequest } from '../lib/api';
 import ParticipantList from './ParticipantList';
 import RaffleDrawer from './RaffleDrawer';
 import AuditLogs from './AuditLogs';
+import BackupManager from './BackupManager';
 
 export default function AdminDashboard({ token, onLogout }) {
-  const [activeTab, setActiveTab] = useState('participants'); // 'participants' | 'raffle' | 'logs'
+  const [activeTab, setActiveTab] = useState('participants');
   const [participants, setParticipants] = useState([]);
-  const [winners, setWinners] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [winners, setWinners] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [notification, setNotification] = useState('');
+  const [toastMessage, setToastMessage] = useState('');
 
-  // 상급 관리자 인증 상태 (세션 스토리지 유지)
-  const [superToken, setSuperToken] = useState(() => {
-    return sessionStorage.getItem('heyum_super_token') || '';
-  });
+  const toastTimer = useRef();
+  const showToast = useCallback((msg) => {
+    clearTimeout(toastTimer.current);
+    setToastMessage(msg);
+    toastTimer.current = setTimeout(() => setToastMessage(''), 4000);
+  }, []);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  // 상급 인증은 현재 화면 메모리에만 보관합니다.
+  const [superToken, setSuperToken] = useState('');
+
   const [superAuthModal, setSuperAuthModal] = useState({
     isOpen: false,
     targetTab: null,
@@ -24,51 +45,49 @@ export default function AdminDashboard({ token, onLogout }) {
     isVerifying: false
   });
 
-  const showToast = (msg) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(''), 3000);
-  };
-
   const [storageMode, setStorageMode] = useState('');
   const [showStorageGuide, setShowStorageGuide] = useState(false);
 
-  // 데이터 로드
-  const fetchData = async () => {
-    setIsLoading(true);
+  const requestSequence = useRef(0);
+  const fetchData = useCallback(async (silent = false) => {
+    const sequence = ++requestSequence.current;
+    if (silent !== true) setIsLoading(true);
     try {
-      const headers = { 
-        Authorization: `Bearer ${token}`,
-        ...(superToken ? { 'x-super-token': superToken } : {})
-      };
-
-      const [resPart, resLogs] = await Promise.all([
-        fetch('/api/admin/participants', { headers }),
-        fetch('/api/admin/logs', { headers })
-      ]);
-
-      if (resPart.ok) {
-        const dataPart = await resPart.json();
-        setParticipants(dataPart.participants || []);
-        setWinners(dataPart.winners || []);
-        if (dataPart.storageMode) setStorageMode(dataPart.storageMode);
+      const data = await apiRequest('/api/admin/participants', { token });
+      if (sequence !== requestSequence.current) return;
+      setParticipants(data.participants); setWinners(data.winners); setStorageMode(data.storageMode);
+      if (superToken) {
+        const result = await apiRequest('/api/admin/backup/vault', { token, superToken });
+        if (sequence !== requestSequence.current) return;
+        setLogs(result.db.logs);
+        try {
+          // Preserve the last nonempty emergency copy when a server unexpectedly returns empty.
+          if (result.db.participants.length || !localStorage.getItem('heyum_emergency_db_vault')) {
+            localStorage.setItem('heyum_emergency_db_vault', JSON.stringify({ ...result.db, _savedAt: new Date().toISOString() }));
+            window.dispatchEvent(new Event('heyum:vault-updated'));
+          }
+        } catch { showToast('브라우저 금고 저장 공간이 부족합니다. JSON 백업을 다운로드해 주세요.'); }
       }
-      if (resLogs.ok) {
-        const dataLogs = await resLogs.json();
-        setLogs(dataLogs.logs || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch admin data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+    } catch (error) { if (sequence === requestSequence.current) showToast(error.message); }
+    finally { if (sequence === requestSequence.current) setIsLoading(false); }
+  }, [token, superToken, showToast]);
   useEffect(() => {
     fetchData();
-  }, [token, superToken]);
+    const interval = setInterval(() => fetchData(true), 10000);
+    return () => { clearInterval(interval); requestSequence.current++; };
+  }, [fetchData, activeTab]);
+  useEffect(() => {
+    const expire = () => {
+      setSuperToken(''); setLogs([]); setActiveTab('participants');
+      setSuperAuthModal({ isOpen: true, targetTab: activeTab === 'participants' ? 'backup' : activeTab, password: '', error: '상급 인증이 만료되었습니다. 다시 인증해 주세요.', isVerifying: false });
+    };
+    window.addEventListener('heyum:super-expired', expire);
+    return () => window.removeEventListener('heyum:super-expired', expire);
+  }, [activeTab]);
 
-  // 상급 관리자 탭 접근 제어 (랜덤 추첨, 감사 로그)
+  // 상급 관리자 탭 접근 제어 (랜덤 추첨, 감사 로그) + 탭 전환 시 데이터 자동 갱신
   const handleSelectTab = (tabName) => {
+    fetchData(true); // 탭 전환 시 항상 최신 데이터 즉각 갱신
     if (tabName === 'participants') {
       setActiveTab('participants');
       return;
@@ -99,24 +118,15 @@ export default function AdminDashboard({ token, onLogout }) {
     setSuperAuthModal(prev => ({ ...prev, isVerifying: true, error: '' }));
 
     try {
-      const res = await fetch('/api/admin/super-auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ superPassword: superAuthModal.password.trim() })
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.superToken) {
+      const data = await apiRequest('/api/admin/super-auth', { token, method: 'POST', body: { superPassword: superAuthModal.password.trim() } });
+      if (data.superToken) {
         setSuperToken(data.superToken);
-        sessionStorage.setItem('heyum_super_token', data.superToken);
+
         const nextTab = superAuthModal.targetTab;
         setSuperAuthModal({ isOpen: false, targetTab: null, password: '', error: '', isVerifying: false });
         setActiveTab(nextTab);
         showToast('👑 상급 관리자 권한이 활성화되었습니다.');
+        fetchData(true);
       } else {
         setSuperAuthModal(prev => ({ 
           ...prev, 
@@ -128,110 +138,40 @@ export default function AdminDashboard({ token, onLogout }) {
       setSuperAuthModal(prev => ({ 
         ...prev, 
         isVerifying: false, 
-        error: '인증 통신 중 오류가 발생했습니다.' 
+        error: err.message 
       }));
     }
   };
 
-  // 참여자 수동 추가
-  const handleAddParticipant = async (entry) => {
-    try {
-      const res = await fetch('/api/admin/participants', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(entry),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || '추가 실패');
-        return false;
-      }
-      showToast('참여자가 성공적으로 추가되었습니다.');
-      fetchData();
-      return true;
-    } catch (err) {
-      alert('추가 중 오류가 발생했습니다.');
-      return false;
-    }
-  };
-
-  // 참여자 삭제
-  const handleDeleteParticipant = async (id, reason) => {
-    try {
-      const res = await fetch(`/api/admin/participants/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ reason }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || '삭제 실패');
-        return;
-      }
-      showToast('참여자가 삭제되었으며 감사 로그에 기록되었습니다.');
-      fetchData();
-    } catch (err) {
-      alert('삭제 중 오류가 발생했습니다.');
-    }
-  };
-
-  // 추첨 실행 (상급 관리자 전용)
-  const handleDraw = async (count = 50) => {
-    const res = await fetch('/api/admin/draw', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        'x-super-token': superToken
-      },
-      body: JSON.stringify({ count }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || '추첨 실패');
-    }
-    setWinners(data.winners || []);
-    showToast(`${data.winners?.length}명의 당첨자가 선정되었습니다!`);
-    fetchData();
+  const mutate = async (url, body, method = 'POST', elevated = false) => {
+    const data = await apiRequest(url, { token, superToken: elevated ? superToken : undefined, method, body });
+    await fetchData(true);
     return data;
   };
-
-  // 추첨 초기화 (상급 관리자 전용)
+  const handleAddParticipant = async entry => {
+    try { await mutate('/api/admin/participants', entry); showToast('참여자가 추가되었습니다.'); return true; }
+    catch (error) { showToast(error.message); return false; }
+  };
+  const handleDeleteParticipant = async (id, reason) => {
+    try { await mutate('/api/admin/participants/' + encodeURIComponent(id), { reason }, 'DELETE'); showToast('참여자가 삭제되었습니다.'); }
+    catch (error) { showToast(error.message); }
+  };
+  const handleDraw = async () => {
+    const data = await mutate('/api/admin/draw', { count: 50 }, 'POST', true);
+    setWinners(data.winners); showToast(data.winners.length + '명의 당첨자가 선정되었습니다.'); return data;
+  };
   const handleResetDraw = async () => {
-    if (!confirm('정말로 추첨 결과를 초기화하시겠습니까?')) return;
-    try {
-      const res = await fetch('/api/admin/reset-draw', {
-        method: 'POST',
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'x-super-token': superToken
-        },
-      });
-      if (res.ok) {
-        setWinners([]);
-        showToast('추첨 결과가 초기화되었습니다.');
-        fetchData();
-      } else {
-        const data = await res.json();
-        alert(data.message || '초기화 실패');
-      }
-    } catch (err) {
-      alert('초기화 실패');
-    }
+    if (!confirm('추첨 결과를 초기화하시겠습니까?')) return;
+    try { await mutate('/api/admin/reset-draw', undefined, 'POST', true); showToast('추첨 결과가 초기화되었습니다.'); }
+    catch (error) { showToast(error.message); }
   };
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in">
       {/* 알림 토스트 */}
-      {notification && (
+      {toastMessage && (
         <div className="fixed top-20 right-4 z-50 bg-indigo-600 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-2xl animate-scale-up">
-          {notification}
+          {toastMessage}
         </div>
       )}
 
@@ -271,7 +211,7 @@ export default function AdminDashboard({ token, onLogout }) {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchData}
+            onClick={() => fetchData()}
             disabled={isLoading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
           >
@@ -327,7 +267,7 @@ export default function AdminDashboard({ token, onLogout }) {
       </div>
 
       {/* 탭 네비게이션 */}
-      <div className="flex border-b border-slate-800 space-x-2">
+      <div className="flex flex-wrap border-b border-slate-800 gap-1">
         <button
           onClick={() => handleSelectTab('participants')}
           className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors cursor-pointer ${
@@ -378,6 +318,23 @@ export default function AdminDashboard({ token, onLogout }) {
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => handleSelectTab('backup')}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'backup'
+              ? 'border-teal-400 text-teal-400 bg-teal-400/10'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <HardDrive className="w-4 h-4 text-teal-400" />
+          <span>데이터 백업 & 복원</span>
+          {!superToken && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-bold flex items-center gap-0.5">
+              <Lock className="w-2.5 h-2.5" /> 상급전용
+            </span>
+          )}
+        </button>
       </div>
 
       {/* 상급 관리자 2차 인증 모달 */}
@@ -402,7 +359,11 @@ export default function AdminDashboard({ token, onLogout }) {
             </div>
 
             <p className="mt-3 text-xs text-slate-300 leading-relaxed">
-              <strong>{superAuthModal.targetTab === 'raffle' ? '랜덤 추첨 실행' : '보안 감사 로그 열람'}</strong> 기능은 부스 총괄 상급 관리자만 접근할 수 있습니다.
+              <strong>{
+                superAuthModal.targetTab === 'raffle' ? '랜덤 추첨 실행' :
+                superAuthModal.targetTab === 'logs' ? '보안 감사 로그 열람' :
+                '데이터 백업 및 복원'
+              }</strong> 기능은 부스 총괄 상급 관리자만 접근할 수 있습니다.
             </p>
 
             {superAuthModal.error && (
@@ -412,27 +373,27 @@ export default function AdminDashboard({ token, onLogout }) {
               </div>
             )}
 
-            <form onSubmit={handleVerifySuperAuth} className="mt-4 space-y-3">
+            <form onSubmit={handleVerifySuperAuth} className="mt-4 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">
                   상급 관리자 비밀번호
                 </label>
                 <input
                   type="password"
                   value={superAuthModal.password}
                   onChange={(e) => setSuperAuthModal(prev => ({ ...prev, password: e.target.value, error: '' }))}
-                  placeholder="비밀번호를 입력하세요"
+                  placeholder="비밀번호 입력..."
                   autoFocus
                   required
-                  className="modern-input w-full h-11 px-3.5 rounded-xl text-sm font-bold tracking-wider placeholder:text-slate-600 font-mono"
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder:text-slate-600 text-sm focus:border-amber-400 focus:outline-none"
                 />
               </div>
 
-              <div className="pt-2 flex gap-2">
+              <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setSuperAuthModal({ isOpen: false, targetTab: null, password: '', error: '', isVerifying: false })}
-                  className="w-1/2 h-10 rounded-xl border border-white/10 hover:bg-white/5 font-bold text-xs text-slate-300 transition-colors"
+                  className="w-1/2 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors cursor-pointer"
                 >
                   취소
                 </button>
@@ -468,7 +429,7 @@ export default function AdminDashboard({ token, onLogout }) {
           />
         )}
 
-        {activeTab === 'raffle' && (
+        {activeTab === 'raffle' && superToken && (
           <RaffleDrawer
             participants={participants}
             winners={winners}
@@ -477,10 +438,20 @@ export default function AdminDashboard({ token, onLogout }) {
           />
         )}
 
-        {activeTab === 'logs' && (
+        {activeTab === 'logs' && superToken && (
           <AuditLogs
             logs={logs}
             onRefresh={fetchData}
+          />
+        )}
+
+        {activeTab === 'backup' && superToken && (
+          <BackupManager
+            token={token}
+            superToken={superToken}
+            onRequireSuperAuth={() => window.dispatchEvent(new Event('heyum:super-expired'))}
+            onRefreshAll={fetchData}
+            showToast={showToast}
           />
         )}
       </div>
@@ -507,37 +478,9 @@ export default function AdminDashboard({ token, onLogout }) {
                 <p className="text-base font-black text-amber-400 mt-0.5">{storageMode}</p>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="font-bold text-white">🌐 Vercel에서 영구 저장을 유지하는 방법 (택 1)</h4>
-                
-                <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30">
-                  <span className="font-bold text-indigo-300">방법 A: Vercel KV / Upstash (권장, 원클릭)</span>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Vercel 대시보드 → 프로젝트의 <strong>Storage</strong> 탭 → <strong>Create KV Database</strong> 생성 후 연결하면 환경변수가 자동 등록되어 즉시 초고속 영구 저장소로 작동합니다.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30">
-                  <span className="font-bold text-emerald-300">방법 B: GitHub 토큰 등록 (무료, 무설치)</span>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Vercel 대시보드 → <strong>Settings → Environment Variables</strong>에 다음 2개를 등록하면 GitHub 레포에 자동 커밋되어 영구 보존됩니다:
-                  </p>
-                  <code className="block mt-1.5 p-2 bg-slate-950 rounded text-emerald-400 font-mono text-[11px]">
-                    GITHUB_TOKEN: 본인의 GitHub Personal Access Token<br />
-                    GITHUB_REPO: University-Supporters/Random-Chance
-                  </code>
-                </div>
-              </div>
+              <p className="text-slate-300 leading-relaxed">로컬 서버는 메인 DB, 미러 파일과 스냅샷을 저장합니다. 상급 인증 중에는 브라우저 금고도 동기화됩니다. 임시 파일 저장소는 서버 종료 후 유지되지 않을 수 있으므로 다운로드 백업을 보관해 주세요.</p>
             </div>
-
-            <div className="mt-6">
-              <button
-                onClick={() => setShowStorageGuide(false)}
-                className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow transition-all"
-              >
-                확인 완료
-              </button>
-            </div>
+            <button onClick={() => setShowStorageGuide(false)} className="mt-5 w-full py-3 rounded-xl bg-indigo-600 text-white font-bold">확인</button>
           </div>
         </div>
       )}

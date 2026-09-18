@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { GraduationCap, User, Phone, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import { formatPhoneNumber } from '../lib/utils';
+import { apiRequest } from '../lib/api';
 import ConfirmModal from './ConfirmModal';
 import PrivacyModal from './PrivacyModal';
 
@@ -14,7 +15,8 @@ export default function UserForm({ onSuccess }) {
   });
   const [noInstagram, setNoInstagram] = useState(false);
 
-  const [agreeTerms, setAgreeTerms] = useState(true);
+  const [agreeTerms, setAgreeTerms] = useState(false);
+  const submitLock = useRef(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -38,7 +40,7 @@ export default function UserForm({ onSuccess }) {
   };
 
   const handleInstagramChange = (e) => {
-    setFormData(prev => ({ ...prev, instagram: e.target.value }));
+    setFormData(prev => ({ ...prev, instagram: e.target.value.replace(/^@+/, '') }));
     setErrorMessage('');
   };
 
@@ -69,7 +71,7 @@ export default function UserForm({ onSuccess }) {
       setErrorMessage('올바른 휴대폰 번호를 입력해 주세요.');
       return;
     }
-    if (!noInstagram && !formData.instagram.trim()) {
+    if (!noInstagram && !/^[A-Za-z0-9._]{1,30}$/.test(formData.instagram.trim())) {
       setErrorMessage('인스타그램 아이디를 입력하시거나 [계정 없음]을 체크해 주세요.');
       return;
     }
@@ -82,6 +84,8 @@ export default function UserForm({ onSuccess }) {
   };
 
   const handleFinalSubmit = async () => {
+    if (submitLock.current) return;
+    submitLock.current = true;
     setIsSubmitting(true);
     setErrorMessage('');
 
@@ -90,20 +94,9 @@ export default function UserForm({ onSuccess }) {
       : (formData.instagram.trim() ? `@${formData.instagram.trim().replace(/^@/, '')}` : '없음');
 
     try {
-      const res = await fetch('/api/participants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          instagram: formattedInstagram,
-        }),
+      await apiRequest('/api/participants', {
+        method: 'POST', body: { ...formData, name: formData.name.trim(), instagram: formattedInstagram, noInstagram }
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || '응모 처리 중 오류가 발생했습니다.');
-      }
 
       setShowConfirmModal(false);
       onSuccess(formData.name);
@@ -111,14 +104,15 @@ export default function UserForm({ onSuccess }) {
       setErrorMessage(err.message || '네트워크 오류가 발생했습니다.');
       setShowConfirmModal(false);
     } finally {
+      submitLock.current = false;
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="w-full max-w-md mx-auto my-auto">
+    <div className="user-form w-full max-w-md mx-auto">
       {/* 컴팩트 헤딩 (스크롤 방지를 위한 최적화) */}
-      <div className="text-center mb-3 sm:mb-4">
+      <div className="form-heading text-center mb-3">
         <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold mb-1.5">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
           <span>2026 축제 부스 이벤트</span>
@@ -132,15 +126,15 @@ export default function UserForm({ onSuccess }) {
       </div>
 
       {/* 모던 슬릭 글래스 카드 */}
-      <div className="glass-panel rounded-3xl p-4 sm:p-5 shadow-2xl">
+      <div className="form-panel glass-panel rounded-3xl p-4 sm:p-5 shadow-2xl">
         {errorMessage && (
-          <div className="mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
+          <div role="alert" className="form-error mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
             <span>{errorMessage}</span>
           </div>
         )}
 
-        <form onSubmit={handleFirstCheck} className="space-y-3">
+        <form autoComplete="off" onSubmit={handleFirstCheck} className="space-y-3">
           {/* 학번 & 이름 (스크롤 방지를 위해 모바일에서도 2열 그리드로 정돈) */}
           <div className="grid grid-cols-2 gap-2.5">
             <div>
@@ -151,7 +145,7 @@ export default function UserForm({ onSuccess }) {
                 type="tel"
                 inputMode="numeric"
                 value={formData.studentId}
-                onChange={handleStudentIdChange}
+                id="studentId" name="studentId" aria-label="학번" onChange={handleStudentIdChange}
                 placeholder="60241234"
                 maxLength={8}
                 required
@@ -166,7 +160,7 @@ export default function UserForm({ onSuccess }) {
               <input
                 type="text"
                 value={formData.name}
-                onChange={handleNameChange}
+                id="name" name="name" aria-label="이름" onChange={handleNameChange}
                 placeholder="홍길동"
                 maxLength={20}
                 required
@@ -187,7 +181,7 @@ export default function UserForm({ onSuccess }) {
               type="tel"
               inputMode="numeric"
               value={formData.phone}
-              onChange={handlePhoneChange}
+              id="phone" name="phone" aria-label="휴대폰 번호" onChange={handlePhoneChange}
               placeholder="010-1234-5678"
               maxLength={13}
               required
@@ -220,7 +214,7 @@ export default function UserForm({ onSuccess }) {
               <input
                 type="text"
                 value={noInstagram ? '계정 없음 (인스타 미사용)' : formData.instagram}
-                onChange={handleInstagramChange}
+                id="instagram" name="instagram" aria-label="인스타그램 아이디" onChange={handleInstagramChange}
                 disabled={noInstagram}
                 placeholder="hyeyum_official"
                 maxLength={30}
@@ -263,6 +257,7 @@ export default function UserForm({ onSuccess }) {
           <div className="pt-1">
             <button
               type="submit"
+              disabled={isSubmitting}
               className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-[0.99] text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <span>확인하기</span>

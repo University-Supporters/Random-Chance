@@ -1,276 +1,170 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { getKvData, saveKvData, getGitHubData, saveGitHubData } from './storage-adapters.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// 데이터 파일 경로 (로컬: data/db.json, Vercel fallback: /tmp/db.json)
-const DATA_DIR = process.env.VERCEL ? '/tmp' : path.resolve(__dirname, '../data');
+const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? '/tmp' : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data'));
 const DB_FILE = path.join(DATA_DIR, 'db.json');
-
-// 기본 스키마
-const defaultData = {
-  participants: [],
-  logs: [],
-  winners: [],
-  settings: {
-    drawCount: 50,
-    allowDuplicatePhone: false,
-    allowDuplicateStudentId: false,
-  }
-};
-
-// 인메모리 캐시 (서버리스 웜 인스턴스 대응)
-let memoryCache = null;
-let lastFetchTime = 0;
-const CACHE_TTL_MS = 2000; // 2초 캐시
-
-// 1. 디렉토리 확인 및 로컬 파일 초기화
-function ensureLocalDb() {
+const MIRROR = path.join(DATA_DIR, 'db.backup.json');
+const BACKUPS = path.join(DATA_DIR, 'backups');
+const defaults = () => ({ participants: [], winners: [], logs: [], settings: { drawCount: 50, allowDuplicatePhone: false, allowDuplicateStudentId: false } });
+let lastSnapshot = 0;
+let queue = Promise.resolve();
+// Serialize the complete read–validate–write transaction within this Node process.
+function exclusive(work) {
+  const result = queue.then(work);
+  queue = result.catch(() => {});
+  return result;
+}
+function ensureDirectories() { fs.mkdirSync(BACKUPS, { recursive: true }); }
+function atomicWrite(filename, data) {
+  const temp = `${filename}.${randomUUID()}.tmp`;
+  let fd;
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(defaultData, null, 2), 'utf-8');
-    }
-  } catch (err) {
-    console.error('[DB] ensureLocalDb error:', err.message);
+    fd = fs.openSync(temp, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify(data, null, 2), 'utf8');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd); fd = undefined;
+    fs.renameSync(temp, filename);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    if (fs.existsSync(temp)) fs.unlinkSync(temp);
   }
 }
-
-// 2. Upstash / Vercel KV REST 연동 헬퍼
-async function getKvData() {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return null;
-
-  try {
-    const res = await fetch(`${url}/get/heyum_booth_data`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json && json.result) {
-      return typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
-    }
-    return null;
-  } catch (e) {
-    console.error('[DB] Upstash KV read error:', e.message);
-    return null;
-  }
+export function validateDbData(input) {
+  const invalid = () => { const e = new Error('백업 형식이 올바르지 않습니다. 참여자 정보와 중복 학번·전화번호를 확인해 주세요.'); e.status = 400; throw e; };
+  if (!input || typeof input !== 'object' || !Array.isArray(input.participants)) invalid();
+  if (input.logs !== undefined && !Array.isArray(input.logs)) invalid();
+  if (input.winners !== undefined && !Array.isArray(input.winners)) invalid();
+  const ids = new Set(), students = new Set(), phones = new Set();
+  const participants = input.participants.map(p => {
+    if (!p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 20 || typeof p.studentId !== 'string' || !/^60\d{6}$/.test(p.studentId) || typeof p.phone !== 'string') invalid();
+    const phoneClean = p.phone.replace(/[^0-9]/g, '');
+    if (!/^\d{10,11}$/.test(phoneClean) || ids.has(p.id) || students.has(p.studentId) || phones.has(phoneClean)) invalid();
+    if (p.instagram !== undefined && typeof p.instagram !== 'string') invalid();
+    if (p.createdAt && !Number.isFinite(Date.parse(p.createdAt))) invalid();
+    ids.add(p.id); students.add(p.studentId); phones.add(phoneClean);
+    return { ...p, phoneClean, instagram: p.instagram || '없음' };
+  });
+  const winnerIds = new Set();
+  const winners = (input.winners || []).map(w => {
+    if (!w || !ids.has(w.id) || winnerIds.has(w.id)) invalid();
+    winnerIds.add(w.id);
+    return { ...participants.find(p => p.id === w.id), rank: w.rank, wonAt: w.wonAt };
+  });
+  if ((input.logs || []).some(l => !l || typeof l.id !== 'string' || typeof l.action !== 'string' || typeof l.details !== 'string' || !Number.isFinite(Date.parse(l.timestamp)))) invalid();
+  return { ...input, participants, winners, logs: input.logs || [], settings: { ...defaults().settings, ...input.settings, allowDuplicatePhone: false, allowDuplicateStudentId: false } };
 }
-
-async function saveKvData(data) {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return false;
-
-  try {
-    const res = await fetch(`${url}/set/heyum_booth_data`, {
-      method: 'POST',
-      headers: { 
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
-    });
-    return res.ok;
-  } catch (e) {
-    console.error('[DB] Upstash KV write error:', e.message);
-    return false;
-  }
+function snapshotNames() {
+  ensureDirectories();
+  return fs.readdirSync(BACKUPS).filter(f => /^(backup|manual|pre_restore)_[\w.-]+\.json$/.test(f))
+    .sort((a,b) => fs.statSync(path.join(BACKUPS,b)).mtimeMs - fs.statSync(path.join(BACKUPS,a)).mtimeMs);
 }
-
-// 3. GitHub Contents API 원격 파일 연동 헬퍼 (별도 DB 설치 없는 무료 영구 저장소)
-async function getGitHubData() {
-  const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPO || 'University-Supporters/Random-Chance';
-  if (!token) return null;
-
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/contents/data/db.json?ref=main`, {
-      headers: {
-        'Authorization': `token ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'Heyum-Booth-App'
-      }
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json && json.content) {
-      const contentStr = Buffer.from(json.content, 'base64').toString('utf-8');
-      const parsed = JSON.parse(contentStr);
-      parsed._gh_sha = json.sha; // 커밋용 sha 보관
-      return parsed;
-    }
-    return null;
-  } catch (e) {
-    console.error('[DB] GitHub API read error:', e.message);
-    return null;
-  }
+function snapshot(data, prefix = 'backup') {
+  ensureDirectories();
+  const filename = `${prefix}_${new Date().toISOString().replace(/[:.]/g, '-')}_${randomUUID()}.json`;
+  atomicWrite(path.join(BACKUPS, filename), data);
+  snapshotNames().filter(f => f.startsWith('backup_')).slice(40).forEach(f => fs.unlinkSync(path.join(BACKUPS, f)));
+  return { filename, timestamp: new Date().toISOString(), participantCount: data.participants.length };
 }
-
-async function saveGitHubData(data) {
-  const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPO || 'University-Supporters/Random-Chance';
-  if (!token) return false;
-
-  try {
-    // 최신 sha 확인
-    let sha = data._gh_sha;
-    if (!sha) {
-      const checkRes = await fetch(`https://api.github.com/repos/${repo}/contents/data/db.json?ref=main`, {
-        headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Heyum-Booth-App'
-        }
-      });
-      if (checkRes.ok) {
-        const checkJson = await checkRes.json();
-        sha = checkJson.sha;
-      }
-    }
-
-    const cleanData = { ...data };
-    delete cleanData._gh_sha;
-    const contentEncoded = Buffer.from(JSON.stringify(cleanData, null, 2), 'utf-8').toString('base64');
-
-    const res = await fetch(`https://api.github.com/repos/${repo}/contents/data/db.json`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `token ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Heyum-Booth-App'
-      },
-      body: JSON.stringify({
-        message: 'data: 축제 부스 참여자 데이터 자동 동기화 [skip ci]',
-        content: contentEncoded,
-        branch: 'main',
-        ...(sha ? { sha } : {})
-      })
-    });
-
-    if (res.ok) {
-      const resJson = await res.json();
-      data._gh_sha = resJson.content?.sha;
-      return true;
-    }
-    return false;
-  } catch (e) {
-    console.error('[DB] GitHub API write error:', e.message);
-    return false;
-  }
-}
-
-// 4. 로컬 파일 읽기 / 쓰기
 function readLocalDb() {
-  ensureLocalDb();
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('[DB] readLocalDb error:', e.message);
+  ensureDirectories();
+  const candidates = [DB_FILE, MIRROR, ...snapshotNames().map(f => path.join(BACKUPS, f))];
+  let hadFile = false;
+  for (const filename of candidates) {
+    if (!fs.existsSync(filename)) continue;
+    hadFile = true;
+    let data;
+    try { data = validateDbData(JSON.parse(fs.readFileSync(filename, 'utf8'))); } catch { continue; }
+    if (filename !== DB_FILE) { atomicWrite(DB_FILE, data); atomicWrite(MIRROR, data); }
+    return data;
   }
-  return { ...defaultData };
+  if (hadFile) throw new Error('DB와 모든 백업을 읽을 수 없습니다. 기존 파일을 보존했습니다.');
+  const data = defaults();
+  atomicWrite(DB_FILE, data); atomicWrite(MIRROR, data);
+  return data;
 }
-
-function writeLocalDb(data) {
-  ensureLocalDb();
-  try {
-    const clean = { ...data };
-    delete clean._gh_sha;
-    const temp = `${DB_FILE}.tmp.${Date.now()}`;
-    fs.writeFileSync(temp, JSON.stringify(clean, null, 2), 'utf-8');
-    fs.renameSync(temp, DB_FILE);
-    return true;
-  } catch (e) {
-    console.error('[DB] writeLocalDb error:', e.message);
-    return false;
-  }
+function writeLocalDb(data, force = false) {
+  ensureDirectories();
+  const clean = { ...data }; delete clean._gh_sha;
+  atomicWrite(DB_FILE, clean); atomicWrite(MIRROR, clean);
+  if (force || Date.now() - lastSnapshot >= 300000) { snapshot(clean); lastSnapshot = Date.now(); }
 }
-
-// ==================== 외부 인터페이스 ====================
-
-// 데이터 가져오기 (비동기, KV -> GitHub -> 로컬 파일 순)
-export async function getDbData() {
-  const now = Date.now();
-  if (memoryCache && (now - lastFetchTime < CACHE_TTL_MS)) {
-    return memoryCache;
-  }
-
-  // 1순위: Vercel KV / Upstash
-  const kvData = await getKvData();
-  if (kvData) {
-    memoryCache = kvData;
-    lastFetchTime = now;
-    return kvData;
-  }
-
-  // 2순위: GitHub API 영구 저장소
-  const ghData = await getGitHubData();
-  if (ghData) {
-    memoryCache = ghData;
-    lastFetchTime = now;
-    return ghData;
-  }
-
-  // 3순위: 로컬 파일 시스템
-  const local = readLocalDb();
-  memoryCache = local;
-  lastFetchTime = now;
-  return local;
-}
-
-// 데이터 저장하기 (비동기, 로컬 + 원격 동시 저장)
-export async function saveDbData(data) {
-  memoryCache = data;
-  lastFetchTime = Date.now();
-
-  // 로컬 파일 쓰기
-  writeLocalDb(data);
-
-  // Vercel KV가 있으면 비동기 저장
+async function readData() {
   if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    saveKvData(data).catch(() => {});
+    const data = await getKvData();
+    return data ? validateDbData(data) : readLocalDb();
   }
-
-  // GitHub Token이 있으면 비동기 저장
   if (process.env.GITHUB_TOKEN) {
-    saveGitHubData(data).catch(() => {});
+    const data = await getGitHubData();
+    if (!data) throw new Error('원격 저장소 데이터가 없습니다.');
+    return validateDbData(data);
   }
-
-  return true;
+  return readLocalDb();
 }
-
-// 감사 로그 추가 헬퍼
-export async function addAuditLog(action, details, ip = 'unknown', author = '시스템') {
-  const db = await getDbData();
-  const logEntry = {
-    id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-    timestamp: new Date().toISOString(),
-    action,
-    details,
-    ip,
-    author
-  };
-  if (!db.logs) db.logs = [];
-  db.logs.unshift(logEntry);
-  if (db.logs.length > 1000) {
-    db.logs = db.logs.slice(0, 1000);
+async function persist(data, force = false) {
+  const valid = validateDbData(data);
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    if (!await saveKvData(valid)) throw new Error('원격 저장 실패');
+  } else if (process.env.GITHUB_TOKEN) {
+    if (!await saveGitHubData(valid)) throw new Error('원격 저장 실패');
   }
-  await saveDbData(db);
-  return logEntry;
+  writeLocalDb(valid, force);
+  return valid;
 }
-
-// 현재 연결된 스토리지 모드 확인
+export const getDbData = () => exclusive(async () => structuredClone(await readData()));
+export const saveDbData = (data, force = false) => exclusive(() => persist(data, force));
+export const updateDbData = (mutate, force = false) => exclusive(async () => {
+  const db = structuredClone(await readData());
+  const result = await mutate(db);
+  await persist(db, force);
+  return result;
+});
+export function appendAuditLog(db, action, details, ip = 'unknown', author = '시스템') {
+  const entry = { id: `log_${randomUUID()}`, timestamp: new Date().toISOString(), action, details, ip, author };
+  db.logs.unshift(entry);
+  return entry;
+}
+export const addAuditLog = (...args) => updateDbData(db => appendAuditLog(db, ...args));
+export const createManualSnapshot = () => exclusive(async () => snapshot(await readData(), 'manual'));
+export function getAvailableSnapshots() {
+  return snapshotNames().map(filename => {
+    const stat = fs.statSync(path.join(BACKUPS, filename));
+    return { filename, sizeBytes: stat.size, createdAt: stat.mtime.toISOString(), isManual: filename.startsWith('manual_') };
+  });
+}
+export function readSnapshot(filename) {
+  if (typeof filename !== 'string' || !snapshotNames().includes(filename)) {
+    const error = new Error('해당 스냅샷을 찾을 수 없습니다.'); error.status = 404; throw error;
+  }
+  return validateDbData(JSON.parse(fs.readFileSync(path.join(BACKUPS, filename), 'utf8')));
+}
+export const restoreDbData = (target, source = '외부 백업', audit = {}) => exclusive(async () => {
+  const restored = validateDbData(target);
+  let current;
+  try { current = await readData(); }
+  catch (error) {
+    // External recovery remains possible when every local recovery copy is corrupt.
+    // Never use this path for remote outages or ordinary disk permission failures.
+    if (!error.message.startsWith('DB와 모든 백업')) throw error;
+    ensureDirectories();
+    for (const file of [DB_FILE, MIRROR]) {
+      if (fs.existsSync(file)) fs.copyFileSync(file, path.join(BACKUPS, 'corrupt_' + randomUUID() + '.raw'));
+    }
+    current = defaults();
+  }
+  snapshot(current, 'pre_restore');
+  if (current._gh_sha) restored._gh_sha = current._gh_sha;
+  else delete restored._gh_sha;
+  const ids = new Set(restored.logs.map(l => l.id));
+  restored.logs = [...current.logs.filter(l => !ids.has(l.id)), ...restored.logs];
+  appendAuditLog(restored, 'DATA_RESTORE', `${source} 복원 (${restored.participants.length}명)`, audit.ip, '상급 관리자');
+  return persist(restored, true);
+});
 export function getStorageMode() {
-  if (process.env.KV_REST_API_URL) return 'Vercel KV / Upstash Redis';
-  if (process.env.GITHUB_TOKEN) return 'GitHub Cloud Storage (Auto-Commit)';
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) return 'Vercel KV / Upstash Redis';
+  if (process.env.GITHUB_TOKEN) return 'GitHub Cloud Storage';
   if (process.env.VERCEL) return 'Vercel Ephemeral Storage (/tmp)';
-  return 'Local Persistent Storage (data/db.json)';
+  return 'Local Dual Mirror Storage';
 }

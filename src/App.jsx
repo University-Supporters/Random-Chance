@@ -11,9 +11,7 @@ export default function App() {
   const [view, setView] = useState('form'); // 'form' | 'success' | 'admin'
   const [participantName, setParticipantName] = useState('');
   const [showMobileQrModal, setShowMobileQrModal] = useState(false);
-  const [adminToken, setAdminToken] = useState(() => {
-    return localStorage.getItem('heyum_admin_token') || '';
-  });
+  const [adminToken, setAdminToken] = useState('');
 
   // URL 경로 감지 (/admin 직접 접근 지원)
   useEffect(() => {
@@ -23,6 +21,7 @@ export default function App() {
   }, []);
 
   const handleGoHome = () => {
+    setAdminToken('');
     setView('form');
     if (window.location.pathname.startsWith('/admin')) {
       window.history.pushState({}, '', '/');
@@ -31,6 +30,7 @@ export default function App() {
 
   const handleToggleAdmin = () => {
     if (view === 'admin') {
+      setAdminToken('');
       setView('form');
       window.history.pushState({}, '', '/');
     } else {
@@ -50,22 +50,29 @@ export default function App() {
 
   const handleAdminLoginSuccess = (token) => {
     setAdminToken(token);
-    localStorage.setItem('heyum_admin_token', token);
+
   };
 
   const handleAdminLogout = () => {
     setAdminToken('');
-    localStorage.removeItem('heyum_admin_token');
-    sessionStorage.removeItem('heyum_super_token');
+
     setView('form');
     window.history.pushState({}, '', '/');
   };
 
+  useEffect(() => {
+    try { localStorage.removeItem('heyum_admin_token'); sessionStorage.removeItem('heyum_super_token'); } catch {}
+    const expire = () => setAdminToken('');
+    const navigate = () => { setAdminToken(''); setView(window.location.pathname.startsWith('/admin') ? 'admin' : 'form'); };
+    window.addEventListener('heyum:session-expired', expire);
+    window.addEventListener('popstate', navigate);
+    return () => { window.removeEventListener('heyum:session-expired', expire); window.removeEventListener('popstate', navigate); };
+  }, []);
   const isUserView = view === 'form' || view === 'success';
 
   return (
     <div className={`w-full bg-[#0b0f19] text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white ${
-      isUserView ? 'h-screen max-h-screen overflow-hidden justify-between' : 'min-h-screen'
+      isUserView ? 'kiosk-shell' : 'min-h-screen'
     }`}>
       {/* 1. 상단 슬림 네비게이션 헤더 */}
       <Header
@@ -76,20 +83,20 @@ export default function App() {
 
       {/* 2. 메인 콘텐츠 영역 (사용자 화면 시 스크롤 없이 수직 중앙 정렬) */}
       <main className={`flex-1 flex flex-col justify-center items-center px-4 ${
-        isUserView ? 'py-1 overflow-hidden' : 'py-8'
+        isUserView ? 'kiosk-main' : 'py-8'
       }`}>
         {/* 사용자 응모 폼 & 인스타 QR 코드 화면 */}
         {view === 'form' && (
-          <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-center gap-6 lg:gap-10 my-auto animate-fade-in">
-            {/* 인스타그램 QR 카드 (데스크톱 및 태블릿에서 메인화면 옆에 나란히 배치) */}
-            <div className="hidden md:flex shrink-0">
+          <div className="kiosk-grid animate-fade-in">
+            {/* 인스타그램 QR 카드 (데스크톱 및 태블릿에서 메인화면 옆에 큼직하게 나란히 배치) */}
+            <div className="kiosk-qr-slot">
               <InstagramQrCard />
             </div>
 
             {/* 사용자 응모 폼 카드 */}
-            <div className="w-full max-w-md">
+            <div className="kiosk-form-slot w-full max-w-md">
               {/* 모바일 화면용 인스타그램 QR 보기 토글 버튼 */}
-              <div className="md:hidden flex justify-center mb-2">
+              <div className="kiosk-mobile-qr flex justify-center mb-2">
                 <button
                   type="button"
                   onClick={() => setShowMobileQrModal(true)}
@@ -138,9 +145,10 @@ export default function App() {
 
       {/* 4. 모바일용 인스타그램 QR 모달 */}
       {showMobileQrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md md:hidden animate-fade-in">
-          <div className="relative w-full max-w-xs animate-scale-up">
+        <div role="dialog" aria-modal="true" aria-label="인스타그램 QR 코드" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="relative w-full max-w-sm animate-scale-up">
             <button
+              aria-label="QR 코드 닫기"
               onClick={() => setShowMobileQrModal(false)}
               className="absolute -top-3 -right-3 z-10 w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center border border-white/20 shadow-xl cursor-pointer"
             >

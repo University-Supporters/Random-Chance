@@ -6,21 +6,19 @@ export default function SuccessCard({ participantName, onReset }) {
   const onResetRef = useRef(onReset);
   onResetRef.current = onReset;
 
-  const [secondsLeft, setSecondsLeft] = useState(4);
+  const [secondsLeft, setSecondsLeft] = useState(5);
   const [isExiting, setIsExiting] = useState(false);
 
   // 즉시 넘어가기 핸들러
   const handleInstantSkip = () => {
-    setIsExiting(true);
-    setTimeout(() => {
-      if (onResetRef.current) onResetRef.current();
-    }, 150);
+    onResetRef.current?.();
   };
 
   useEffect(() => {
     // 1. 화려한 Confetti 폭죽 팡 터뜨리기
     try {
       confetti({
+        disableForReducedMotion: true,
         particleCount: 85,
         spread: 85,
         origin: { y: 0.55 },
@@ -31,7 +29,7 @@ export default function SuccessCard({ participantName, onReset }) {
       console.error(e);
     }
 
-    // 2. 실시간 초 카운트다운 (4초)
+    // 2. 실시간 초 카운트다운 (5초)
     const countdownInterval = setInterval(() => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
@@ -42,17 +40,17 @@ export default function SuccessCard({ participantName, onReset }) {
       });
     }, 1000);
 
-    // 3. 4.1초 후 페이드아웃 시작
+    // 3. 4.8초 후 페이드아웃 시작
     const exitTimer = setTimeout(() => {
       setIsExiting(true);
-    }, 4100);
+    }, 4800);
 
-    // 4. 4.5초 후 최종 화면 전환
+    // 4. 5초 후 최종 화면 전환
     const resetTimer = setTimeout(() => {
       if (onResetRef.current) {
         onResetRef.current();
       }
-    }, 4500);
+    }, 5000);
 
     return () => {
       clearInterval(countdownInterval);
@@ -70,18 +68,18 @@ export default function SuccessCard({ participantName, onReset }) {
       title="터치하면 즉시 다음 참여자 화면으로 넘어갑니다"
     >
       <div className="glass-panel rounded-3xl p-6 sm:p-7 text-center shadow-2xl relative overflow-hidden border border-emerald-500/30">
-        {/* 상단 프로그레스 바 (4.5초 동안 부드럽게 감소) */}
+        {/* 상단 프로그레스 바 (5초 동안 부드럽게 감소) */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-white/10 overflow-hidden">
           <div 
             className="h-full bg-gradient-to-r from-emerald-400 via-indigo-500 to-amber-400 transition-all duration-1000 ease-linear"
-            style={{ width: `${(secondsLeft / 4) * 100}%` }}
+            style={{ width: `${(secondsLeft / 5) * 100}%` }}
           />
         </div>
 
         {/* 팡 터지는 체크마크 서클 애니메이션 */}
-        <div className="relative w-18 h-18 mx-auto my-2">
+        <div className="relative w-16 h-16 mx-auto my-2">
           <div className="absolute inset-0 rounded-full bg-emerald-500/25 animate-ping opacity-75" />
-          <div className="relative w-18 h-18 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-xl shadow-emerald-500/30">
+          <div className="relative w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-xl shadow-emerald-500/30">
             <Check className="w-9 h-9 stroke-[3] animate-bounce-slow" />
           </div>
         </div>

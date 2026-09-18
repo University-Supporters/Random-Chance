@@ -36,7 +36,8 @@ export function exportToCSV(filename, headers, rows) {
     headers.join(','),
     ...rows.map(row => 
       row.map(val => {
-        const text = (val ?? '').toString().replace(/"/g, '""');
+        const raw = (val ?? '').toString();
+        const text = (/^[=+@\-\t\r]/.test(raw) ? "'" + raw : raw).replace(/"/g, '""');
         return `"${text}"`;
       }).join(',')
     )
@@ -51,4 +52,5 @@ export function exportToCSV(filename, headers, rows) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

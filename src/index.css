@@ -59,3 +59,46 @@ body {
   background: #1e293b;
   border-radius: 9999px;
 }
+
+/* The kiosk uses the available browser viewport, including browser chrome. */
+.kiosk-shell {
+  height: 100dvh;
+  overflow: hidden;
+  background-image: radial-gradient(ellipse at 15% 40%, #a855f712, transparent 50%), radial-gradient(ellipse at 85% 70%, #ec489910, transparent 50%);
+}
+.kiosk-main { min-height: 0; padding-block: clamp(4px, 1.4dvh, 20px); }
+.kiosk-grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 448px); align-items: center; justify-content: center; gap: clamp(24px, 4vw, 64px); width: 100%; max-width: 1100px; }
+.kiosk-qr-slot { display: flex; justify-content: center; min-width: 0; }
+.kiosk-mobile-qr { display: none; }
+.instagram-card { padding: clamp(12px, 2dvh, 20px); gap: 4px; border-color: #ec489935; box-shadow: 0 20px 60px #0006, 0 0 35px #a855f710; }
+.qr-image-frame { width: min(100%, clamp(230px, 46dvh, 370px)); margin-block: clamp(6px, 1.3dvh, 12px); flex-shrink: 0; }
+.qr-image { display: block; width: 100%; height: auto; }
+.form-panel { border-color: #a78bfa30; box-shadow: 0 20px 60px #0006, 0 0 35px #818cf810; }
+.form-heading h2 { font-size: clamp(22px, 2.8dvh, 30px); }
+.form-error { line-height: 1.4; }
+button:focus-visible, a:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 3px; }
+button:disabled { cursor: not-allowed; }
+@media (min-width: 768px) and (max-height: 680px) {
+  .kiosk-shell header > div { height: 48px; }
+  .kiosk-shell footer { padding-block: 6px; }
+  .form-heading { margin-bottom: 8px; }
+  .form-panel { padding: 14px; }
+  .user-form form > * + * { margin-top: 8px; }
+  .form-error { padding: 7px; margin-bottom: 8px; }
+  .instagram-card h3 { font-size: 22px; }
+}
+@media (max-width: 767px) {
+  .kiosk-grid { display: flex; gap: 0; }
+  .kiosk-qr-slot { display: none; }
+  .kiosk-mobile-qr { display: flex; }
+  .kiosk-main { justify-content: flex-start; overflow-y: auto; }
+  .kiosk-form-slot { margin-block: auto; }
+}
+/* Very short viewports and zoom retain access instead of clipping form controls. */
+@media (max-height: 540px) {
+  .kiosk-main { overflow-y: auto; justify-content: flex-start; }
+  .kiosk-grid { margin-block: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
