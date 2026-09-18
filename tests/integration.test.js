@@ -6,7 +6,7 @@ import path from 'node:path';
 
 process.env.NODE_ENV = 'test';
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'heyum-test-'));
-for (const key of ['KV_REST_API_URL', 'KV_REST_API_TOKEN', 'GITHUB_TOKEN', 'VERCEL']) delete process.env[key];
+for (const key of ['KV_REST_API_URL', 'KV_REST_API_TOKEN', 'GITHUB_TOKEN', 'VERCEL', 'SESSION_SECRET']) delete process.env[key];
 const { default: app } = await import('../server.js');
 const db = await import('../api/db.js');
 const server = app.listen(0, '127.0.0.1');
@@ -30,6 +30,20 @@ test('integration: authentication, duplicate concurrency, raffle and safe recove
       assert.ok(superToken && superToken !== '9372707');
       const other = (await call('/admin/login', { method: 'POST', body: { password: '1111' } })).data.token;
       assert.equal((await call('/admin/logs', { token: other, superToken })).status, 403);
+    });
+    await t.test('admin login and elevation survive requests handled by another server instance', async () => {
+      const { default: replicaApp } = await import('../server.js?replica=2');
+      const replica = replicaApp.listen(0, '127.0.0.1');
+      await new Promise(resolve => replica.once('listening', resolve));
+      try {
+        const response = await fetch('http://127.0.0.1:' + replica.address().port + '/api/admin/super-auth', {
+          method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ superPassword: '9372707' })
+        });
+        assert.equal(response.status, 200, 'another instance must recognize the first-stage session');
+        const elevated = await response.json();
+        assert.equal((await call('/admin/logs', { token, superToken: elevated.superToken })).status, 200);
+      } finally { await new Promise(resolve => replica.close(resolve)); }
     });
     await t.test('every protected API rejects ordinary access and raw super password', async () => {
       for (const [method,url] of [['GET','/admin/logs'],['GET','/admin/winners'],['POST','/admin/draw'],['POST','/admin/reset-draw'],['POST','/admin/reset-all'],['GET','/admin/backup/download'],['GET','/admin/backup/vault'],['GET','/admin/backup/snapshots'],['POST','/admin/backup/snapshot'],['POST','/admin/backup/restore'],['POST','/admin/backup/rollback-snapshot']]) {

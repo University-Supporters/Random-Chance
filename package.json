@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
-    "test": "node --test tests/integration.test.js"
+    "test": "node --test tests/integration.test.js tests/session.test.js"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

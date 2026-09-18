@@ -1,14 +1,15 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID, randomInt, createHmac, timingSafeEqual } from 'node:crypto';
+import { randomUUID, randomInt } from 'node:crypto';
+import { createSessionTokens } from './api/session.js';
 import { getDbData, updateDbData, appendAuditLog, addAuditLog, getStorageMode, createManualSnapshot, getAvailableSnapshots, restoreDbData, readSnapshot } from './api/db.js';
 
 const app = express();
 const root = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1111';
 const SUPER_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '9372707';
-const secret = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
+const sessionTokens = createSessionTokens();
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error; };
 const ip = req => req.ip || req.socket.remoteAddress || 'unknown';
@@ -19,30 +20,17 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10mb' }));
-function sign(value) { return createHmac('sha256', secret).update(value).digest('base64url'); }
-function issueToken(role, session) {
-  const payload = Buffer.from(JSON.stringify({ role, session, exp: Date.now() + (role === 'super' ? 30 * 60000 : 8 * 3600000) })).toString('base64url');
-  return `${payload}.${sign(payload)}`;
-}
-function verifyToken(token, role) {
-  if (typeof token !== 'string' || token.length > 2048) return null;
-  const [payload, signature, extra] = token.split('.');
-  if (!payload || !signature || extra) return null;
-  const expected = Buffer.from(sign(payload)), actual = Buffer.from(signature);
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
-  try { const data = JSON.parse(Buffer.from(payload, 'base64url').toString()); return data.role === role && data.exp > Date.now() ? data : null; } catch { return null; }
-}
-export function authMiddleware(req, res, next) {
+export const authMiddleware = asyncRoute(async (req, res, next) => {
   const match = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
-  req.auth = verifyToken(match?.[1], 'admin');
+  req.auth = await sessionTokens.verify(match?.[1], 'admin');
   if (!req.auth) return res.status(401).json({ success: false, message: '관리자 인증이 만료되었습니다. 다시 로그인해 주세요.' });
   next();
-}
-export function superAuthMiddleware(req, res, next) {
-  const auth = verifyToken(req.headers['x-super-token'], 'super');
+});
+export const superAuthMiddleware = asyncRoute(async (req, res, next) => {
+  const auth = await sessionTokens.verify(req.headers['x-super-token'], 'super');
   if (!auth || auth.session !== req.auth.session) return res.status(403).json({ success: false, message: '상급 관리자 2차 인증이 필요합니다.' });
   next();
-}
+});
 const attempts = new Map();
 function loginLimit(req, res, next) {
   const now = Date.now();
@@ -57,13 +45,13 @@ router.post('/admin/login', loginLimit, asyncRoute(async (req,res) => {
   const ok = req.body?.password === ADMIN_PASSWORD;
   await addAuditLog(ok ? 'ADMIN_LOGIN_SUCCESS' : 'ADMIN_LOGIN_FAIL', ok ? '관리자 로그인 성공' : '관리자 로그인 실패', ip(req), '관리자');
   if (!ok) fail(401, '비밀번호가 올바르지 않습니다.');
-  res.json({ success: true, token: issueToken('admin', randomUUID()) });
+  res.json({ success: true, token: await sessionTokens.issue('admin', randomUUID()) });
 }));
 router.post('/admin/super-auth', authMiddleware, loginLimit, asyncRoute(async (req,res) => {
   const ok = req.body?.superPassword === SUPER_PASSWORD;
   await addAuditLog(ok ? 'SUPER_LOGIN_SUCCESS' : 'SUPER_LOGIN_FAIL', ok ? '상급 관리자 인증 성공' : '상급 관리자 인증 실패', ip(req), '관리자');
   if (!ok) fail(403, '상급 관리자 비밀번호가 일치하지 않습니다.');
-  res.json({ success: true, superToken: issueToken('super', req.auth.session) });
+  res.json({ success: true, superToken: await sessionTokens.issue('super', req.auth.session) });
 }));
 function participantInput(body) {
   if (!body || ['studentId','name','phone'].some(key => typeof body[key] !== 'string')) fail(400, '학번, 이름, 전화번호를 입력해 주세요.');
@@ -167,7 +155,7 @@ app.get('*', (req,res) => res.sendFile(path.join(root, 'dist/index.html')));
 app.use((err,req,res,next) => {
   const status = err.type === 'entity.too.large' ? 413 : err.status || 500;
   if (status >= 500) console.error('[API]', err.message);
-  res.status(status).json({ success: false, message: status === 413 ? '백업 파일은 10MB 이하여야 합니다.' : status >= 500 ? '저장 또는 조회에 실패했습니다. 연결과 저장소 상태를 확인해 주세요.' : err.type === 'entity.parse.failed' ? '올바른 JSON 데이터를 보내 주세요.' : err.message });
+  res.status(status).json({ success: false, message: status === 413 ? '백업 파일은 10MB 이하여야 합니다.' : status === 503 ? err.message : status >= 500 ? '저장 또는 조회에 실패했습니다. 연결과 저장소 상태를 확인해 주세요.' : err.type === 'entity.parse.failed' ? '올바른 JSON 데이터를 보내 주세요.' : err.message });
 });
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) app.listen(process.env.PORT || 3001, () => console.log('혜윰 부스 서버 실행 중'));
 export default app;
