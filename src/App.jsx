@@ -4,9 +4,13 @@ import UserForm from './components/UserForm';
 import SuccessCard from './components/SuccessCard';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
+import InstagramQrCard from './components/InstagramQrCard';
+import InstagramIcon from './components/InstagramIcon';
+
 export default function App() {
   const [view, setView] = useState('form'); // 'form' | 'success' | 'admin'
   const [participantName, setParticipantName] = useState('');
+  const [showMobileQrModal, setShowMobileQrModal] = useState(false);
   const [adminToken, setAdminToken] = useState(() => {
     return localStorage.getItem('heyum_admin_token') || '';
   });
@@ -52,6 +56,7 @@ export default function App() {
   const handleAdminLogout = () => {
     setAdminToken('');
     localStorage.removeItem('heyum_admin_token');
+    sessionStorage.removeItem('heyum_super_token');
     setView('form');
     window.history.pushState({}, '', '/');
   };
@@ -73,9 +78,30 @@ export default function App() {
       <main className={`flex-1 flex flex-col justify-center items-center px-4 ${
         isUserView ? 'py-1 overflow-hidden' : 'py-8'
       }`}>
-        {/* 사용자 응모 폼 */}
+        {/* 사용자 응모 폼 & 인스타 QR 코드 화면 */}
         {view === 'form' && (
-          <UserForm onSuccess={handleFormSuccess} />
+          <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-center gap-6 lg:gap-10 my-auto animate-fade-in">
+            {/* 인스타그램 QR 카드 (데스크톱 및 태블릿에서 메인화면 옆에 나란히 배치) */}
+            <div className="hidden md:flex shrink-0">
+              <InstagramQrCard />
+            </div>
+
+            {/* 사용자 응모 폼 카드 */}
+            <div className="w-full max-w-md">
+              {/* 모바일 화면용 인스타그램 QR 보기 토글 버튼 */}
+              <div className="md:hidden flex justify-center mb-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileQrModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-pink-500/15 via-purple-500/15 to-amber-500/15 border border-pink-500/30 text-pink-300 text-xs font-bold hover:bg-pink-500/25 transition-all shadow cursor-pointer"
+                >
+                  <InstagramIcon className="w-3.5 h-3.5 text-pink-400" />
+                  <span>인스타그램 팔로우 QR코드 보기</span>
+                </button>
+              </div>
+              <UserForm onSuccess={handleFormSuccess} />
+            </div>
+          </div>
         )}
 
         {/* 응모 완료 화면 */}
@@ -109,6 +135,21 @@ export default function App() {
           <span className="text-slate-600 hidden sm:inline">모두가 존중받는 따뜻한 캠퍼스 문화</span>
         </div>
       </footer>
+
+      {/* 4. 모바일용 인스타그램 QR 모달 */}
+      {showMobileQrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md md:hidden animate-fade-in">
+          <div className="relative w-full max-w-xs animate-scale-up">
+            <button
+              onClick={() => setShowMobileQrModal(false)}
+              className="absolute -top-3 -right-3 z-10 w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center border border-white/20 shadow-xl cursor-pointer"
+            >
+              ✕
+            </button>
+            <InstagramQrCard />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

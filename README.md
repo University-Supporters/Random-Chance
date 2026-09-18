@@ -68,6 +68,6 @@ docker-compose up --build -d
      - Vercel 프로젝트 → **Settings → Environment Variables**에 아래 2개 환경변수 등록:
        - `GITHUB_TOKEN`: GitHub Personal Access Token (repo 권한)
        - `GITHUB_REPO`: `University-Supporters/Random-Chance`
-   - **옵션 C (관리자 및 초기화 비밀번호 설정)**:
-     - `ADMIN_PASSWORD`: 운영진 대시보드 로그인 비밀번호 (기본값: `1111`)
-     - `RESET_PASSWORD`: 데이터 전체 초기화 전용 보안 비밀번호 (기본값: `heyum`)
+   - **옵션 C (관리자 및 상급 관리자 비밀번호 설정)**:
+     - `ADMIN_PASSWORD`: 운영진 대시보드 기본 로그인 비밀번호 (기본값: `1111`)
+     - `SUPER_ADMIN_PASSWORD`: 랜덤 추첨 및 감사로그 열람 전용 상급 관리자 비밀번호 (기본값: `9372707`)

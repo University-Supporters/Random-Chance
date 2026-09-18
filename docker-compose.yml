@@ -12,7 +12,7 @@ services:
     environment:
       - PORT=3000
       - ADMIN_PASSWORD=1111
-      - RESET_PASSWORD=heyum
+      - SUPER_ADMIN_PASSWORD=9372707
       - NODE_ENV=production
     volumes:
       # 서버 데이터 영구 저장 볼륨 마운트

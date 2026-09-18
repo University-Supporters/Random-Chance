@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Trophy, Shield, LogOut, RefreshCw, BarChart3, Trash2 } from 'lucide-react';
+import { Users, Trophy, Shield, LogOut, RefreshCw, BarChart3, Lock, KeyRound, Crown, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import ParticipantList from './ParticipantList';
 import RaffleDrawer from './RaffleDrawer';
 import AuditLogs from './AuditLogs';
@@ -11,6 +11,18 @@ export default function AdminDashboard({ token, onLogout }) {
   const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState('');
+
+  // 상급 관리자 인증 상태 (세션 스토리지 유지)
+  const [superToken, setSuperToken] = useState(() => {
+    return sessionStorage.getItem('heyum_super_token') || '';
+  });
+  const [superAuthModal, setSuperAuthModal] = useState({
+    isOpen: false,
+    targetTab: null,
+    password: '',
+    error: '',
+    isVerifying: false
+  });
 
   const showToast = (msg) => {
     setNotification(msg);
@@ -24,13 +36,14 @@ export default function AdminDashboard({ token, onLogout }) {
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      const headers = { 
+        Authorization: `Bearer ${token}`,
+        ...(superToken ? { 'x-super-token': superToken } : {})
+      };
+
       const [resPart, resLogs] = await Promise.all([
-        fetch('/api/admin/participants', {
-          headers: { Authorization: `Bearer ${token}` }
-        }),
-        fetch('/api/admin/logs', {
-          headers: { Authorization: `Bearer ${token}` }
-        })
+        fetch('/api/admin/participants', { headers }),
+        fetch('/api/admin/logs', { headers })
       ]);
 
       if (resPart.ok) {
@@ -52,7 +65,73 @@ export default function AdminDashboard({ token, onLogout }) {
 
   useEffect(() => {
     fetchData();
-  }, [token]);
+  }, [token, superToken]);
+
+  // 상급 관리자 탭 접근 제어 (랜덤 추첨, 감사 로그)
+  const handleSelectTab = (tabName) => {
+    if (tabName === 'participants') {
+      setActiveTab('participants');
+      return;
+    }
+
+    // raffle 또는 logs는 상급 관리자 인증 필수
+    if (superToken) {
+      setActiveTab(tabName);
+    } else {
+      setSuperAuthModal({
+        isOpen: true,
+        targetTab: tabName,
+        password: '',
+        error: '',
+        isVerifying: false
+      });
+    }
+  };
+
+  // 상급 관리자 비밀번호 검증
+  const handleVerifySuperAuth = async (e) => {
+    e.preventDefault();
+    if (!superAuthModal.password.trim()) {
+      setSuperAuthModal(prev => ({ ...prev, error: '상급 관리자 비밀번호를 입력해 주세요.' }));
+      return;
+    }
+
+    setSuperAuthModal(prev => ({ ...prev, isVerifying: true, error: '' }));
+
+    try {
+      const res = await fetch('/api/admin/super-auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ superPassword: superAuthModal.password.trim() })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.superToken) {
+        setSuperToken(data.superToken);
+        sessionStorage.setItem('heyum_super_token', data.superToken);
+        const nextTab = superAuthModal.targetTab;
+        setSuperAuthModal({ isOpen: false, targetTab: null, password: '', error: '', isVerifying: false });
+        setActiveTab(nextTab);
+        showToast('👑 상급 관리자 권한이 활성화되었습니다.');
+      } else {
+        setSuperAuthModal(prev => ({ 
+          ...prev, 
+          isVerifying: false, 
+          error: data.message || '비밀번호가 올바르지 않습니다.' 
+        }));
+      }
+    } catch (err) {
+      setSuperAuthModal(prev => ({ 
+        ...prev, 
+        isVerifying: false, 
+        error: '인증 통신 중 오류가 발생했습니다.' 
+      }));
+    }
+  };
 
   // 참여자 수동 추가
   const handleAddParticipant = async (entry) => {
@@ -102,13 +181,14 @@ export default function AdminDashboard({ token, onLogout }) {
     }
   };
 
-  // 추첨 실행
+  // 추첨 실행 (상급 관리자 전용)
   const handleDraw = async (count = 50) => {
     const res = await fetch('/api/admin/draw', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'x-super-token': superToken
       },
       body: JSON.stringify({ count }),
     });
@@ -122,56 +202,27 @@ export default function AdminDashboard({ token, onLogout }) {
     return data;
   };
 
-  // 추첨 초기화
+  // 추첨 초기화 (상급 관리자 전용)
   const handleResetDraw = async () => {
     if (!confirm('정말로 추첨 결과를 초기화하시겠습니까?')) return;
     try {
       const res = await fetch('/api/admin/reset-draw', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'x-super-token': superToken
+        },
       });
       if (res.ok) {
         setWinners([]);
         showToast('추첨 결과가 초기화되었습니다.');
         fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.message || '초기화 실패');
       }
     } catch (err) {
       alert('초기화 실패');
-    }
-  };
-
-  // 모든 데이터 전체 초기화 (참여자, 감사로그 일괄 삭제 - 전용 보안 비밀번호 확인)
-  const handleResetAll = async () => {
-    const inputPassword = window.prompt(
-      '⚠️ [보안 경고] 모든 참여자 명단, 당첨자 내역, 감사 로그가 영구 삭제됩니다.\n\n계속 진행하시려면 초기화 전용 관리자 비밀번호를 입력해 주세요:'
-    );
-    if (inputPassword === null) return; // 사용자가 취소함
-    if (!inputPassword.trim()) {
-      alert('초기화 비밀번호가 입력되지 않았습니다.');
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/admin/reset-all', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({ resetPassword: inputPassword.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setParticipants([]);
-        setWinners([]);
-        setLogs([]);
-        showToast('모든 참여자 명단 및 감사 로그가 초기화되었습니다.');
-        fetchData();
-      } else {
-        alert(data.message || '초기화 실패: 비밀번호가 올바르지 않습니다.');
-      }
-    } catch (err) {
-      alert('전체 초기화 중 통신 오류가 발생했습니다.');
     }
   };
 
@@ -192,8 +243,17 @@ export default function AdminDashboard({ token, onLogout }) {
               부스 운영 대시보드
             </h2>
             <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              서포터즈 관리자
+              운영진
             </span>
+            {superToken ? (
+              <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                <Crown className="w-3.5 h-3.5 text-amber-400" /> 상급 관리자 권한
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-white/5">
+                <Lock className="w-3 h-3 text-slate-500" /> 일반 운영진 모드
+              </span>
+            )}
             {storageMode && (
               <button
                 onClick={() => setShowStorageGuide(true)}
@@ -213,18 +273,10 @@ export default function AdminDashboard({ token, onLogout }) {
           <button
             onClick={fetchData}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>새로고침</span>
-          </button>
-          <button
-            onClick={handleResetAll}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-bold border border-red-500/30 transition-colors cursor-pointer"
-            title="모든 참여자 명단 및 감사 로그 일괄 초기화"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>데이터 전체 초기화</span>
           </button>
           <button
             onClick={onLogout}
@@ -277,8 +329,8 @@ export default function AdminDashboard({ token, onLogout }) {
       {/* 탭 네비게이션 */}
       <div className="flex border-b border-slate-800 space-x-2">
         <button
-          onClick={() => setActiveTab('participants')}
-          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors ${
+          onClick={() => handleSelectTab('participants')}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors cursor-pointer ${
             activeTab === 'participants'
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10'
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -289,8 +341,8 @@ export default function AdminDashboard({ token, onLogout }) {
         </button>
 
         <button
-          onClick={() => setActiveTab('raffle')}
-          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors ${
+          onClick={() => handleSelectTab('raffle')}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors cursor-pointer ${
             activeTab === 'raffle'
               ? 'border-amber-400 text-amber-400 bg-amber-400/10'
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -298,6 +350,11 @@ export default function AdminDashboard({ token, onLogout }) {
         >
           <Trophy className="w-4 h-4 text-amber-400" />
           <span>★ 50명 랜덤 추첨기</span>
+          {!superToken && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold flex items-center gap-0.5">
+              <Lock className="w-2.5 h-2.5" /> 상급전용
+            </span>
+          )}
           {winners.length > 0 && (
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-bold">
               완료
@@ -306,8 +363,8 @@ export default function AdminDashboard({ token, onLogout }) {
         </button>
 
         <button
-          onClick={() => setActiveTab('logs')}
-          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors ${
+          onClick={() => handleSelectTab('logs')}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-black border-b-2 transition-colors cursor-pointer ${
             activeTab === 'logs'
               ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -315,8 +372,89 @@ export default function AdminDashboard({ token, onLogout }) {
         >
           <Shield className="w-4 h-4" />
           <span>감사 로그 ({logs.length})</span>
+          {!superToken && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-0.5">
+              <Lock className="w-2.5 h-2.5" /> 상급전용
+            </span>
+          )}
         </button>
       </div>
+
+      {/* 상급 관리자 2차 인증 모달 */}
+      {superAuthModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-3xl p-6 shadow-2xl text-slate-100 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-base text-white">
+                  상급 관리자 2차 인증
+                </h3>
+              </div>
+              <button
+                onClick={() => setSuperAuthModal({ isOpen: false, targetTab: null, password: '', error: '', isVerifying: false })}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-slate-300 leading-relaxed">
+              <strong>{superAuthModal.targetTab === 'raffle' ? '랜덤 추첨 실행' : '보안 감사 로그 열람'}</strong> 기능은 부스 총괄 상급 관리자만 접근할 수 있습니다.
+            </p>
+
+            {superAuthModal.error && (
+              <div className="mt-3 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{superAuthModal.error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifySuperAuth} className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">
+                  상급 관리자 비밀번호
+                </label>
+                <input
+                  type="password"
+                  value={superAuthModal.password}
+                  onChange={(e) => setSuperAuthModal(prev => ({ ...prev, password: e.target.value, error: '' }))}
+                  placeholder="비밀번호를 입력하세요"
+                  autoFocus
+                  required
+                  className="modern-input w-full h-11 px-3.5 rounded-xl text-sm font-bold tracking-wider placeholder:text-slate-600 font-mono"
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSuperAuthModal({ isOpen: false, targetTab: null, password: '', error: '', isVerifying: false })}
+                  className="w-1/2 h-10 rounded-xl border border-white/10 hover:bg-white/5 font-bold text-xs text-slate-300 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={superAuthModal.isVerifying}
+                  className="w-1/2 h-10 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  {superAuthModal.isVerifying ? (
+                    <span className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>잠금 해제</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* 탭 본문 영역 */}
       <div className="pt-2">

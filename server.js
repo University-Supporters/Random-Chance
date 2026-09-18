@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1111';
-const RESET_PASSWORD = process.env.RESET_PASSWORD || 'heyum';
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '9372707';
 
 app.use(cors());
 app.use(express.json());
@@ -47,15 +47,30 @@ function getClientIp(req) {
   return ip;
 }
 
-// 관리자 인증 미들웨어
+// 1차 일반 관리자 인증 미들웨어 (기본 비밀번호: 1111)
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).json({ success: false, message: '관리자 인증 토큰이 필요합니다.' });
   }
   const token = authHeader.replace(/^Bearer\s+/i, '');
-  if (token !== ADMIN_PASSWORD) {
+  if (token !== ADMIN_PASSWORD && token !== SUPER_ADMIN_PASSWORD) {
     return res.status(403).json({ success: false, message: '유효하지 않은 관리자 비밀번호입니다.' });
+  }
+  next();
+}
+
+// 2차 상급 관리자 인증 미들웨어 (비밀번호: 9372707)
+function superAuthMiddleware(req, res, next) {
+  const superToken = req.headers['x-super-token'] || 
+                     (req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, '')) ||
+                     (req.body && req.body.superPassword);
+                     
+  if (!superToken || superToken !== SUPER_ADMIN_PASSWORD) {
+    return res.status(403).json({ 
+      success: false, 
+      message: '상급 관리자 인증이 필요합니다. (비밀번호 불일치)' 
+    });
   }
   next();
 }
@@ -280,8 +295,24 @@ router.delete('/admin/participants/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// 6. 관리자 감사 로그 목록 조회
-router.get('/admin/logs', authMiddleware, async (req, res) => {
+// 6. 상급 관리자 인증 검증 라우트 (비밀번호: 9372707)
+router.post('/admin/super-auth', authMiddleware, (req, res) => {
+  const { superPassword } = req.body || {};
+  if (superPassword === SUPER_ADMIN_PASSWORD) {
+    return res.json({ 
+      success: true, 
+      message: '상급 관리자 인증 성공',
+      superToken: SUPER_ADMIN_PASSWORD 
+    });
+  }
+  return res.status(403).json({ 
+    success: false, 
+    message: '상급 관리자 비밀번호가 일치하지 않습니다.' 
+  });
+});
+
+// 7. 관리자 감사 로그 목록 조회 (상급 관리자 전용)
+router.get('/admin/logs', authMiddleware, superAuthMiddleware, async (req, res) => {
   try {
     const db = await getDbData();
     res.json({
@@ -293,8 +324,8 @@ router.get('/admin/logs', authMiddleware, async (req, res) => {
   }
 });
 
-// 7. 50명 랜덤 추첨 실행
-router.post('/admin/draw', authMiddleware, async (req, res) => {
+// 8. 50명 랜덤 추첨 실행 (상급 관리자 전용)
+router.post('/admin/draw', authMiddleware, superAuthMiddleware, async (req, res) => {
   try {
     const { count = 50 } = req.body;
     const clientIp = getClientIp(req);
@@ -322,9 +353,9 @@ router.post('/admin/draw', authMiddleware, async (req, res) => {
 
     await addAuditLog(
       'RAFFLE_DRAW',
-      `랜덤 추첨 진행: 총 ${pool.length}명 중 ${drawCount}명 당첨자 선발 완료`,
+      `랜덤 추첨 진행: 총 ${pool.length}명 중 ${drawCount}명 당첨자 선발 완료 (상급 관리자 인증)`,
       clientIp,
-      '관리자'
+      '상급 관리자'
     );
 
     res.json({
@@ -337,7 +368,7 @@ router.post('/admin/draw', authMiddleware, async (req, res) => {
   }
 });
 
-// 8. 당첨자 목록 조회
+// 9. 당첨자 목록 조회
 router.get('/admin/winners', authMiddleware, async (req, res) => {
   try {
     const db = await getDbData();
@@ -350,15 +381,15 @@ router.get('/admin/winners', authMiddleware, async (req, res) => {
   }
 });
 
-// 9. 추첨 결과 초기화
-router.post('/admin/reset-draw', authMiddleware, async (req, res) => {
+// 10. 추첨 결과 초기화 (상급 관리자 전용)
+router.post('/admin/reset-draw', authMiddleware, superAuthMiddleware, async (req, res) => {
   try {
     const clientIp = getClientIp(req);
     const db = await getDbData();
     db.winners = [];
     await saveDbData(db);
 
-    await addAuditLog('RAFFLE_RESET', '추첨 당첨자 명단 초기화', clientIp, '관리자');
+    await addAuditLog('RAFFLE_RESET', '추첨 당첨자 명단 초기화 (상급 관리자)', clientIp, '상급 관리자');
 
     res.json({ success: true, message: '추첨 결과가 초기화되었습니다.' });
   } catch (err) {
@@ -366,17 +397,10 @@ router.post('/admin/reset-draw', authMiddleware, async (req, res) => {
   }
 });
 
-// 10. 모든 데이터 전체 초기화 (참여자, 당첨자, 감사로그 일괄 삭제 - 전용 보안 비밀번호 필요)
-router.post('/admin/reset-all', authMiddleware, async (req, res) => {
+// 11. 모든 데이터 전체 초기화 (상급 관리자 전용)
+router.post('/admin/reset-all', authMiddleware, superAuthMiddleware, async (req, res) => {
   try {
-    const { resetPassword } = req.body || {};
-    if (!resetPassword || resetPassword !== RESET_PASSWORD) {
-      return res.status(403).json({ 
-        success: false, 
-        message: '초기화 전용 관리자 비밀번호가 일치하지 않습니다.' 
-      });
-    }
-
+    const clientIp = getClientIp(req);
     const cleanDb = {
       participants: [],
       logs: [],
@@ -389,12 +413,12 @@ router.post('/admin/reset-all', authMiddleware, async (req, res) => {
     };
     await saveDbData(cleanDb);
 
-    await addAuditLog({
-      type: '데이터 전체 초기화',
-      operator: '최고 관리자',
-      ip: getClientIp(req),
-      detail: '전용 초기화 비밀번호 확인을 통해 모든 응모자 명단 및 감사 로그를 초기화함'
-    });
+    await addAuditLog(
+      'DATA_RESET_ALL',
+      '전체 데이터 및 감사 로그 일괄 초기화 수행',
+      clientIp,
+      '상급 관리자'
+    );
 
     res.json({ success: true, message: '모든 참여자 명단 및 감사 로그가 성공적으로 초기화되었습니다.' });
   } catch (err) {
@@ -445,7 +469,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`[서버 구동] 포트 ${PORT}에서 축제 부스 상품권 서버가 실행 중입니다.`);
     console.log(`스토리지 모드: ${getStorageMode()}`);
     console.log(`관리자 기본 비밀번호: ${ADMIN_PASSWORD}`);
-    console.log(`초기화 전용 비밀번호: ${RESET_PASSWORD}`);
+    console.log(`상급 관리자 비밀번호: ${SUPER_ADMIN_PASSWORD}`);
   });
 }
 
