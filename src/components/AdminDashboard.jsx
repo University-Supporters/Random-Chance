@@ -17,6 +17,7 @@ import ParticipantList from './ParticipantList';
 import RaffleDrawer from './RaffleDrawer';
 import AuditLogs from './AuditLogs';
 import BackupManager from './BackupManager';
+import OfflineQueuePanel from './OfflineQueuePanel';
 
 export default function AdminDashboard({ token, onLogout }) {
   const [activeTab, setActiveTab] = useState('participants');
@@ -275,6 +276,8 @@ export default function AdminDashboard({ token, onLogout }) {
           </button>
         </div>
       </div>
+
+      <OfflineQueuePanel onRefresh={fetchData} />
 
       {/* 통계 카드 3종 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

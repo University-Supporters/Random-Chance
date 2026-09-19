@@ -8,7 +8,9 @@ export async function apiRequest(url, { token, superToken, method = 'GET', body,
   if (!response.ok) {
     if (response.status === 401 && token) window.dispatchEvent(new Event('heyum:session-expired'));
     if (response.status === 403 && superToken) window.dispatchEvent(new Event('heyum:super-expired'));
-    throw new Error(data.message || '요청을 처리하지 못했습니다.');
+    const error = new Error(data.message || '요청을 처리하지 못했습니다.');
+    error.status = response.status;
+    throw error;
   }
   return data;
 }

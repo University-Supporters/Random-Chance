@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 process.env.NODE_ENV = 'test';
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'heyum-test-'));
@@ -148,6 +149,14 @@ test('integration: authentication, duplicate concurrency, raffle and safe recove
       const result = await call('/admin/backup/restore', { method: 'POST', token, superToken, body: { backupData: backup } });
       assert.equal(result.status, 200); assert.equal((await db.getDbData()).participants.length, 55);
       assert.ok(fs.readdirSync(path.join(process.env.DATA_DIR, 'backups')).some(f => f.startsWith('corrupt_')));
+    });
+    await t.test('retrying an uncertain response uses one registration only', async () => {
+      const requestId = randomUUID();
+      const body = { ...entry(1001), requestId };
+      assert.equal((await call('/participants', { method: 'POST', body })).status, 201);
+      assert.equal((await call('/participants', { method: 'POST', body })).status, 200);
+      assert.equal((await call('/participants', { method: 'POST', body: { ...body, name: '다른 사람' } })).status, 409);
+      assert.equal((await db.getDbData()).participants.filter(p => p.requestId === requestId).length, 1);
     });
   } finally { await new Promise(resolve => server.close(resolve)); }
 });

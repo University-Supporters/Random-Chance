@@ -59,19 +59,28 @@ function participantInput(body) {
   const raw = body.instagram.trim().replace(/^@+/, '');
   const instagram = body.noInstagram === true || raw === '없음' ? '없음' : `@${raw}`;
   if (instagram !== '없음' && !/^[A-Za-z0-9._]{1,30}$/.test(raw)) fail(400, '올바른 인스타그램 아이디를 입력해 주세요.');
-  return { studentId, name, phone, phoneClean, instagram };
+  const requestId = body.requestId;
+  if (requestId !== undefined && (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))) fail(400, '응모 요청 번호가 올바르지 않습니다.');
+  return { studentId, name, phone, phoneClean, instagram, ...(requestId ? { requestId } : {}) };
 }
 const register = manual => asyncRoute(async (req,res) => {
   requireDurableRegistration();
   const entry = participantInput(req.body);
-  const participant = await updateDbData(db => {
+  const result = await updateDbData(db => {
+    if (entry.requestId) {
+      const existing = db.participants.find(p => p.requestId === entry.requestId);
+      if (existing) {
+        if (existing.studentId !== entry.studentId || existing.phoneClean !== entry.phoneClean || existing.name !== entry.name || existing.instagram !== entry.instagram) fail(409, '이전 응모 요청과 정보가 일치하지 않습니다.');
+        return { participant: existing, replayed: true };
+      }
+    }
     if (db.participants.some(p => p.studentId === entry.studentId || p.phoneClean === entry.phoneClean)) fail(409, '이미 등록된 학번 또는 전화번호입니다. (1인 1회 응모)');
     const participant = { ...entry, id: `p_${randomUUID()}`, createdAt: new Date().toISOString(), ip: ip(req) };
     db.participants.push(participant);
     appendAuditLog(db, manual ? 'ADMIN_ADD_PARTICIPANT' : 'PARTICIPANT_REGISTER', `${manual ? '수동' : '신규'} 등록: ${entry.name} (${entry.studentId})`, ip(req), manual ? '관리자' : '부스 참가자');
-    return participant;
+    return { participant, replayed: false };
   });
-  res.status(201).json({ success: true, ...(manual ? { participant } : { data: { id: participant.id, name: participant.name, createdAt: participant.createdAt } }) });
+  res.status(result.replayed ? 200 : 201).json({ success: true, ...(manual ? { participant: result.participant } : { data: { id: result.participant.id, name: result.participant.name, createdAt: result.participant.createdAt } }) });
 });
 router.post('/participants', register(false));
 // All admin routes below require first-stage authentication, including all backup routes.

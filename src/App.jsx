@@ -7,12 +7,21 @@ import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import InstagramQrCard from './components/InstagramQrCard';
 import InstagramIcon from './components/InstagramIcon';
+import QueuedCard from './components/QueuedCard';
+import { startQueueSync } from './lib/offlineQueue';
 
 export default function App() {
-  const [view, setView] = useState('form'); // 'form' | 'success' | 'admin'
+  const [view, setView] = useState('form'); // 'form' | 'success' | 'queued' | 'admin'
   const [participantName, setParticipantName] = useState('');
   const [showMobileQrModal, setShowMobileQrModal] = useState(false);
   const [adminToken, setAdminToken] = useState('');
+  const [queueStatus, setQueueStatus] = useState({ pending: 0, review: 0 });
+  useEffect(() => {
+    const onUpdate = event => setQueueStatus(event.detail);
+    window.addEventListener('heyum:queue-updated', onUpdate);
+    const stop = startQueueSync();
+    return () => { stop(); window.removeEventListener('heyum:queue-updated', onUpdate); };
+  }, []);
 
   // URL 경로 감지 (/admin 직접 접근 지원)
   useEffect(() => {
@@ -76,7 +85,7 @@ export default function App() {
     window.addEventListener('popstate', navigate);
     return () => { window.removeEventListener('heyum:session-expired', expire); window.removeEventListener('popstate', navigate); };
   }, []);
-  const isUserView = view === 'form' || view === 'success';
+  const isUserView = view === 'form' || view === 'success' || view === 'queued';
 
   return (
     <div className={`w-full bg-[#0b0f19] text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white ${
@@ -114,7 +123,7 @@ export default function App() {
                   <span>인스타그램 팔로우 QR코드 보기</span>
                 </button>
               </div>
-              <UserForm onSuccess={handleFormSuccess} />
+              <UserForm onSuccess={handleFormSuccess} onQueued={() => setView('queued')} />
             </div>
           </div>
         )}
@@ -126,6 +135,7 @@ export default function App() {
             onReset={handleResetToForm}
           />
         )}
+        {view === 'queued' && <QueuedCard onReset={handleResetToForm} />}
 
         {/* 관리자 화면 */}
         {view === 'admin' && (
@@ -142,6 +152,12 @@ export default function App() {
           )
         )}
       </main>
+
+      {(queueStatus.pending > 0 || queueStatus.review > 0) && <div className="fixed bottom-10 left-3 z-40 rounded-xl bg-amber-950/95 border border-amber-400/40 px-3 py-2 text-xs text-amber-100 shadow-xl" role="status">
+        {queueStatus.pending > 0 && <span>자동 전송 대기 {queueStatus.pending}건</span>}
+        {queueStatus.pending > 0 && queueStatus.review > 0 && <span> · </span>}
+        {queueStatus.review > 0 && <span>운영진 확인 필요 {queueStatus.review}건</span>}
+      </div>}
 
       {/* 3. 하단 미니멀 푸터 */}
       <footer className="w-full border-t border-white/[0.04] py-2.5 text-center text-[11px] text-slate-500 font-medium shrink-0">

@@ -1,0 +1,67 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
+process.env.NODE_ENV = 'test';
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'heyum-offline-ui-'));
+for (const key of ['KV_REST_API_URL', 'KV_REST_API_TOKEN', 'GITHUB_TOKEN', 'VERCEL']) delete process.env[key];
+const { default: app } = await import('../server.js');
+const db = await import('../api/db.js');
+const server = app.listen(0, '127.0.0.1');
+await new Promise(resolve => server.once('listening', resolve));
+const base = `http://127.0.0.1:${server.address().port}`;
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const context = await browser.newContext();
+const page = await context.newPage();
+try {
+  await page.goto(base);
+  await page.getByLabel('학번', { exact: true }).fill('60249998');
+  await page.getByLabel('이름', { exact: true }).fill('오프라인검증');
+  await page.getByLabel('휴대폰 번호', { exact: true }).fill('01098765432');
+  await page.getByText('계정 없음', { exact: true }).click();
+  await page.getByText('[필수]', { exact: true }).click();
+  await page.setViewportSize({ width: 1366, height: 600 });
+  await context.setOffline(true);
+  await page.getByText(/연결이 끊겼습니다/).waitFor({ timeout: 12000 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1));
+  await page.getByRole('button', { name: '확인하기', exact: true }).click();
+  await page.getByRole('button', { name: '네, 정보가 맞습니다' }).click();
+  await page.getByText('이 기기에 임시 보관했습니다').waitFor();
+  assert.equal((await db.getDbData()).participants.length, 0);
+  assert.equal(await page.evaluate(async () => {
+    const request = indexedDB.open('heyum-pending-registrations');
+    const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const tx = database.transaction('submissions', 'readonly');
+    return new Promise((resolve, reject) => { const count = tx.objectStore('submissions').count(); count.onsuccess = () => resolve(count.result); count.onerror = () => reject(count.error); });
+  }), 1);
+  await context.setOffline(false);
+  await page.getByText('자동 전송 대기 1건').waitFor({ state: 'hidden', timeout: 15000 });
+  assert.equal((await db.getDbData()).participants.length, 1);
+  assert.equal((await db.getDbData()).participants[0].name, '오프라인검증');
+  await page.locator('.user-form').waitFor();
+  await page.getByLabel('학번', { exact: true }).fill('60249997');
+  await page.getByLabel('이름', { exact: true }).fill('재시작검증');
+  await page.getByLabel('휴대폰 번호', { exact: true }).fill('01098765431');
+  await page.getByText('계정 없음', { exact: true }).click();
+  await page.getByText('[필수]', { exact: true }).click();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: '확인하기', exact: true }).click();
+  await page.getByRole('button', { name: '네, 정보가 맞습니다' }).click();
+  await page.getByText('이 기기에 임시 보관했습니다').waitFor();
+  await page.close();
+  await context.setOffline(false);
+  const reopened = await context.newPage();
+  await reopened.goto(base);
+  await reopened.getByText('자동 전송 대기 1건').waitFor({ state: 'hidden', timeout: 15000 });
+  for (let i = 0; i < 40 && (await db.getDbData()).participants.length < 2; i++) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal((await db.getDbData()).participants.length, 2);
+  assert.ok((await db.getDbData()).participants.some(participant => participant.name === '재시작검증'));
+  console.log('Offline queue passed: local copy, reconnect upload, restart recovery and local removal.');
+} finally {
+  await browser.close();
+  await new Promise(resolve => server.close(resolve));
+}

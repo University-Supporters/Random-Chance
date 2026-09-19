@@ -3,10 +3,11 @@ import { GraduationCap, User, Phone, CheckCircle2, AlertCircle, Sparkles } from 
 import InstagramIcon from './InstagramIcon';
 import { formatPhoneNumber } from '../lib/utils';
 import { apiRequest } from '../lib/api';
+import { queueRegistration, sendQueued } from '../lib/offlineQueue';
 import ConfirmModal from './ConfirmModal';
 import PrivacyModal from './PrivacyModal';
 
-export default function UserForm({ onSuccess }) {
+export default function UserForm({ onSuccess, onQueued }) {
   const [formData, setFormData] = useState({
     studentId: '',
     name: '',
@@ -18,10 +19,11 @@ export default function UserForm({ onSuccess }) {
   const [agreeTerms, setAgreeTerms] = useState(false);
   const submitLock = useRef(false);
   const [storageReady, setStorageReady] = useState(false);
+  const [canQueue, setCanQueue] = useState(false);
   const [storageNotice, setStorageNotice] = useState('저장소 연결을 확인하고 있습니다.');
   useEffect(() => {
     let active = true;
-    const check = () => apiRequest('/api/status').then(data => { if (active) { setStorageReady(data.storage.registrationReady); setStorageNotice(data.storage.warning || ''); } }).catch(() => { if (active) { setStorageReady(false); setStorageNotice('서버 연결을 확인해 주세요.'); } });
+    const check = () => apiRequest('/api/status').then(data => { if (active) { setStorageReady(data.storage.registrationReady); setCanQueue(false); setStorageNotice(data.storage.warning || ''); } }).catch(() => { if (active) { setStorageReady(false); setCanQueue(true); setStorageNotice('연결이 끊겼습니다. 확인 후 제출하면 이 기기에 임시 보관하고 자동 전송합니다.'); } });
     check(); const timer = setInterval(check, 10000);
     return () => { active = false; clearInterval(timer); };
   }, []);
@@ -63,7 +65,7 @@ export default function UserForm({ onSuccess }) {
 
   const handleFirstCheck = (e) => {
     e.preventDefault();
-    if (!storageReady) return;
+    if (!storageReady && !canQueue) return;
     setErrorMessage('');
 
     // 60xxxxxx 8자리 학번 검증
@@ -103,12 +105,20 @@ export default function UserForm({ onSuccess }) {
       : (formData.instagram.trim() ? `@${formData.instagram.trim().replace(/^@/, '')}` : '없음');
 
     try {
-      await apiRequest('/api/participants', {
-        method: 'POST', body: { ...formData, name: formData.name.trim(), instagram: formattedInstagram, noInstagram }
-      });
-
+      const payload = { ...formData, name: formData.name.trim(), instagram: formattedInstagram, noInstagram };
+      let id;
+      try { id = await queueRegistration(payload); }
+      catch (storageError) {
+        if (!navigator.onLine || !storageReady) throw storageError;
+        // Browser storage may be disabled; keep normal online registration available.
+        await apiRequest('/api/participants', { method: 'POST', body: { ...payload, requestId: crypto.randomUUID() } });
+        setShowConfirmModal(false); onSuccess(formData.name); return;
+      }
+      const result = navigator.onLine ? await sendQueued(id) : 'pending';
       setShowConfirmModal(false);
-      onSuccess(formData.name);
+      if (result === 'done') onSuccess(formData.name);
+      else if (result === 'pending') onQueued();
+      else setErrorMessage('서버가 응모를 거부했습니다. 운영진이 임시 보관 기록을 확인해 주세요.');
     } catch (err) {
       setErrorMessage(err.message || '네트워크 오류가 발생했습니다.');
       setShowConfirmModal(false);
@@ -267,7 +277,7 @@ export default function UserForm({ onSuccess }) {
           <div className="pt-1">
             <button
               type="submit"
-              disabled={isSubmitting || !storageReady}
+              disabled={isSubmitting || (!storageReady && !canQueue)}
               className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-[0.99] text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <span>확인하기</span>

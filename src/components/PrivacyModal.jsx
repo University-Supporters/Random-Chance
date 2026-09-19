@@ -72,6 +72,11 @@ export default function PrivacyModal({ isOpen, onClose, onAgree }) {
             </p>
           </div>
 
+          <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-400/20 space-y-1.5">
+            <strong className="text-amber-200">인터넷 연결이 끊긴 경우</strong>
+            <p className="text-[11px] text-slate-300">동의 후 제출한 정보는 이 부스 노트북의 브라우저에 임시 보관될 수 있습니다. 인터넷이 복구되면 자동 전송하고, 서버 접수가 확인되면 임시 기록을 삭제합니다. 전송 전에는 응모가 완료되지 않으며 운영진이 상태를 확인할 수 있습니다.</p>
+          </div>
+
           {/* 4. 동의 거부 권리 */}
           <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.06] space-y-1.5">
             <span className="font-bold text-white text-xs flex items-center gap-1.5">

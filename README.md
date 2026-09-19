@@ -27,11 +27,19 @@
 
 ---
 
+## 인터넷 중단 시 임시 응모
+
+- 참가자가 동의하고 최종 확인한 응모는 서버 전송 전에 부스 노트북의 브라우저(IndexedDB)에 먼저 보관됩니다.
+- 인터넷이 끊기면 접수 완료 대신 **임시 보관** 화면이 표시됩니다. 연결이 복구되면 열린 화면에서 즉시 재전송하고, 화면을 다시 열어도 남은 기록을 재전송합니다. 연결 상태 확인을 위해 10초 간격으로도 재시도합니다.
+- 서버가 접수를 확인하면 노트북의 임시 기록을 삭제합니다. 응답이 유실되어 재전송되더라도 동일 요청 번호로 중복 등록되지 않습니다.
+- 중복·입력 오류로 서버가 거부한 기록은 자동 재시도를 멈추고 운영진 대시보드에서 확인하도록 남깁니다.
+- 임시 기록에는 개인정보가 포함됩니다. 전송 완료 전까지 같은 노트북·브라우저를 유지하고 브라우저 데이터를 지우지 마세요. 자동 전송은 사이트가 열린 상태 또는 연결 후 다시 열었을 때 실행됩니다.
+
 ## 🛠 기술 스택
 
 - **Frontend**: React 18, Vite, Tailwind CSS, Lucide React, Canvas Confetti
 - **Backend**: Node.js, Express (로컬/Docker) / Vercel Serverless Functions (`/api`)
-- **Database**: SQLite (로컬/Docker 기본) / PostgreSQL / Supabase 지원
+- **Database**: 로컬 JSON 원본·미러·스냅샷 / Vercel의 Upstash Redis
 - **DevOps**: Docker, Docker Compose, Vercel
 
 ---
