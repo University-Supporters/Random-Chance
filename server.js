@@ -99,22 +99,110 @@ router.use('/admin', superAuthMiddleware);
 router.get('/admin/security', asyncRoute(async (req,res) => res.json({success: true, ...await securityStatus()})));
 router.post('/admin/security/passwords', asyncRoute(async (req,res) => { requireDurableRegistration(); await changePasswords(req.body || {}, ip(req)); res.json({success: true, message:'비밀번호가 변경되었습니다. 다시 로그인해 주세요.'}); }));
 router.get('/admin/logs', asyncRoute(async (req,res) => res.json({ success: true, logs: (await getDbData()).logs })));
-router.get('/admin/winners', asyncRoute(async (req,res) => res.json({ success: true, winners: (await getDbData()).winners })));
+router.get('/admin/winners', asyncRoute(async (req,res) => {
+  const db = await getDbData();
+  res.json({ success: true, winners: db.winners, disqualified: db.disqualifiedWinners || [] });
+}));
 router.post('/admin/draw', asyncRoute(async (req,res) => {
   if (req.body?.count !== undefined && req.body.count !== 50) fail(400, '추첨 인원은 50명입니다.');
   const winners = await updateDbData(db => {
     if (!db.participants.length) fail(400, '참여자가 없습니다.');
-    if (db.winners.length) fail(409, '이미 추첨이 완료되었습니다. 다시 추첨하려면 결과를 초기화해 주세요.');
+    if (db.winners.length >= 50) fail(409, '이미 추첨이 완료되었습니다. 다시 추첨하려면 결과를 초기화해 주세요.');
     const pool = [...db.participants];
     for (let i = pool.length - 1; i > 0; i--) { const j = randomInt(i + 1); [pool[i],pool[j]] = [pool[j],pool[i]]; }
     db.winners = pool.slice(0,50).map((p,i) => ({ ...p, rank: i+1, wonAt: new Date().toISOString() }));
+    db.disqualifiedWinners = [];
     appendAuditLog(db, 'RAFFLE_DRAW', `${pool.length}명 중 ${db.winners.length}명 추첨`, ip(req), '상급 관리자');
     return db.winners;
   });
   res.json({ success: true, winners });
 }));
+// 조건 불충족 당첨자 제외 처리
+router.post('/admin/winners/disqualify', asyncRoute(async (req,res) => {
+  const { participantId, reason } = req.body || {};
+  if (!participantId) fail(400, '제외할 참가자 ID가 필요합니다.');
+  const disqualificationReason = typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 200) : '조건 미충족 (인스타 미팔로우 등)';
+
+  const result = await updateDbData(db => {
+    db.disqualifiedWinners ||= [];
+    const index = db.winners.findIndex(w => w.id === participantId);
+    if (index === -1) fail(404, '해당 당첨자를 찾을 수 없습니다.');
+    const [disqualified] = db.winners.splice(index, 1);
+    const disqualifiedEntry = {
+      ...disqualified,
+      disqualifiedAt: new Date().toISOString(),
+      reason: disqualificationReason
+    };
+    db.disqualifiedWinners.unshift(disqualifiedEntry);
+    appendAuditLog(db, 'WINNER_DISQUALIFIED', `당첨자 제외: ${disqualified.name} (${disqualified.studentId}) - 사유: ${disqualificationReason}`, ip(req), '상급 관리자');
+    return { winners: db.winners, disqualified: db.disqualifiedWinners, removed: disqualifiedEntry };
+  });
+  res.json({ success: true, message: `${result.removed.name}님이 당첨 명단에서 제외되었습니다.`, ...result });
+}));
+// 제외된 자리만큼만 추가 보충 추첨
+router.post('/admin/draw/supplement', asyncRoute(async (req,res) => {
+  const target = req.body?.count !== undefined ? Number(req.body.count) : 50;
+  if (!Number.isFinite(target) || target <= 0 || target > 50) fail(400, '유효한 추첨 목표 인원을 입력해 주세요.');
+
+  const result = await updateDbData(db => {
+    db.disqualifiedWinners ||= [];
+    const currentCount = db.winners.length;
+    if (currentCount >= target) fail(400, `이미 목표 인원(${target}명)이 모두 채워져 있습니다.`);
+    const needed = target - currentCount;
+
+    // 기존 당첨자와 이미 제외된 참가자 ID 목록을 제외
+    const existingIds = new Set([
+      ...db.winners.map(w => w.id),
+      ...db.disqualifiedWinners.map(d => d.id)
+    ]);
+
+    const pool = db.participants.filter(p => !existingIds.has(p.id));
+    if (pool.length === 0) fail(400, '추가 추첨할 수 있는 미당첨 참가자가 없습니다.');
+
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = randomInt(i + 1);
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
+    const drawCount = Math.min(needed, pool.length);
+    const newWinners = pool.slice(0, drawCount).map((p, i) => ({
+      ...p,
+      rank: currentCount + i + 1,
+      wonAt: new Date().toISOString(),
+      isSupplement: true
+    }));
+
+    db.winners.push(...newWinners);
+    appendAuditLog(db, 'RAFFLE_SUPPLEMENT_DRAW', `공석 ${drawCount}명 추가 보충 추첨 완료 (선발: ${newWinners.map(w => w.name).join(', ')})`, ip(req), '상급 관리자');
+    return { winners: db.winners, newWinners, supplementCount: drawCount };
+  });
+  res.json({ success: true, message: `${result.supplementCount}명이 추가 추첨되었습니다.`, ...result });
+}));
+// 실수로 제외한 당첨자 복원
+router.post('/admin/winners/restore-disqualified', asyncRoute(async (req,res) => {
+  const { participantId } = req.body || {};
+  if (!participantId) fail(400, '복원할 참가자 ID가 필요합니다.');
+
+  const result = await updateDbData(db => {
+    db.disqualifiedWinners ||= [];
+    const index = db.disqualifiedWinners.findIndex(d => d.id === participantId);
+    if (index === -1) fail(404, '제외 이력에서 해당 참가자를 찾을 수 없습니다.');
+    if (db.winners.length >= 50) fail(409, '이미 당첨자가 50명으로 가득 찼습니다.');
+    const [restored] = db.disqualifiedWinners.splice(index, 1);
+    delete restored.disqualifiedAt;
+    delete restored.reason;
+    db.winners.push({ ...restored, rank: db.winners.length + 1 });
+    appendAuditLog(db, 'WINNER_RESTORED', `당첨자 복원: ${restored.name} (${restored.studentId})`, ip(req), '상급 관리자');
+    return { winners: db.winners, disqualified: db.disqualifiedWinners, restored };
+  });
+  res.json({ success: true, message: `${result.restored.name}님이 당첨 명단으로 복원되었습니다.`, ...result });
+}));
 router.post('/admin/reset-draw', asyncRoute(async (req,res) => {
-  await updateDbData(db => { db.winners = []; appendAuditLog(db, 'RAFFLE_RESET', '추첨 결과 초기화', ip(req), '상급 관리자'); });
+  await updateDbData(db => { 
+    db.winners = []; 
+    db.disqualifiedWinners = [];
+    appendAuditLog(db, 'RAFFLE_RESET', '추첨 결과 및 제외 이력 초기화', ip(req), '상급 관리자'); 
+  });
   res.json({ success: true });
 }));
 router.post('/admin/reset-all', asyncRoute(async (req,res) => {

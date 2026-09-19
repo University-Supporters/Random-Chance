@@ -9,7 +9,7 @@ const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? '/tmp' : path.res
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const MIRROR = path.join(DATA_DIR, 'db.backup.json');
 const BACKUPS = path.join(DATA_DIR, 'backups');
-const defaults = () => ({ participants: [], winners: [], logs: [], settings: { drawCount: 50, allowDuplicatePhone: false, allowDuplicateStudentId: false } });
+const defaults = () => ({ participants: [], winners: [], disqualifiedWinners: [], logs: [], settings: { drawCount: 50, allowDuplicatePhone: false, allowDuplicateStudentId: false } });
 
 let queue = Promise.resolve();
 // Serialize the complete read–validate–write transaction within this Node process.
@@ -70,6 +70,7 @@ export function validateDbData(input) {
   if (!input || typeof input !== 'object' || !Array.isArray(input.participants)) invalid();
   if (input.logs !== undefined && !Array.isArray(input.logs)) invalid();
   if (input.winners !== undefined && !Array.isArray(input.winners)) invalid();
+  if (input.disqualifiedWinners !== undefined && !Array.isArray(input.disqualifiedWinners)) invalid();
   const ids = new Set(), students = new Set(), phones = new Set();
   const participants = input.participants.map(p => {
     if (!p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 20 || typeof p.studentId !== 'string' || !/^60\d{6}$/.test(p.studentId) || typeof p.phone !== 'string') invalid();
@@ -84,10 +85,14 @@ export function validateDbData(input) {
   const winners = (input.winners || []).map(w => {
     if (!w || !ids.has(w.id) || winnerIds.has(w.id)) invalid();
     winnerIds.add(w.id);
-    return { ...participants.find(p => p.id === w.id), rank: w.rank, wonAt: w.wonAt };
+    return { ...participants.find(p => p.id === w.id), rank: w.rank, wonAt: w.wonAt, isSupplement: w.isSupplement };
+  });
+  const disqualifiedWinners = (input.disqualifiedWinners || []).map(d => {
+    if (!d || typeof d.id !== 'string') invalid();
+    return { ...d, reason: d.reason || '조건 미충족' };
   });
   if ((input.logs || []).some(l => !l || typeof l.id !== 'string' || typeof l.action !== 'string' || typeof l.details !== 'string' || !Number.isFinite(Date.parse(l.timestamp)))) invalid();
-  return { ...input, participants, winners, logs: input.logs || [], settings: { ...defaults().settings, ...input.settings, allowDuplicatePhone: false, allowDuplicateStudentId: false } };
+  return { ...input, participants, winners, disqualifiedWinners, logs: input.logs || [], settings: { ...defaults().settings, ...input.settings, allowDuplicatePhone: false, allowDuplicateStudentId: false } };
 }
 function snapshotNames() {
   ensureDirectories();

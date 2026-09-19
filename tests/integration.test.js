@@ -46,7 +46,7 @@ test('integration: authentication, duplicate concurrency, raffle and safe recove
       } finally { await new Promise(resolve => replica.close(resolve)); }
     });
     await t.test('every protected API rejects ordinary access and raw super password', async () => {
-      for (const [method,url] of [['GET','/admin/logs'],['GET','/admin/winners'],['POST','/admin/draw'],['POST','/admin/reset-draw'],['POST','/admin/reset-all'],['GET','/admin/backup/download'],['GET','/admin/backup/vault'],['GET','/admin/backup/snapshots'],['POST','/admin/backup/snapshot'],['POST','/admin/backup/restore'],['POST','/admin/backup/rollback-snapshot']]) {
+      for (const [method,url] of [['GET','/admin/logs'],['GET','/admin/winners'],['POST','/admin/draw'],['POST','/admin/winners/disqualify'],['POST','/admin/draw/supplement'],['POST','/admin/winners/restore-disqualified'],['POST','/admin/reset-draw'],['POST','/admin/reset-all'],['GET','/admin/backup/download'],['GET','/admin/backup/vault'],['GET','/admin/backup/snapshots'],['POST','/admin/backup/snapshot'],['POST','/admin/backup/restore'],['POST','/admin/backup/rollback-snapshot']]) {
         assert.equal((await call(url, { token, method })).status, 403, url);
         assert.equal((await call(url, { token, method, superToken: '9372707' })).status, 403, url);
       }
@@ -69,6 +69,45 @@ test('integration: authentication, duplicate concurrency, raffle and safe recove
       const result = await call('/admin/draw', { method: 'POST', token, superToken, body: { count: 50 } });
       assert.equal(result.data.winners.length, 50); assert.equal(new Set(result.data.winners.map(w => w.id)).size, 50);
       assert.equal((await call('/admin/draw', { method: 'POST', token, superToken })).status, 409);
+    });
+    await t.test('disqualifies non-compliant winners, blocks re-selection, supplements vacant slots and supports restore', async () => {
+      const initial = await call('/admin/winners', { token, superToken });
+      assert.equal(initial.data.winners.length, 50);
+      assert.equal(initial.data.disqualified.length, 0);
+
+      // Disqualify 2 winners
+      const firstTarget = initial.data.winners[0];
+      const secondTarget = initial.data.winners[1];
+      const disq1 = await call('/admin/winners/disqualify', { method: 'POST', token, superToken, body: { participantId: firstTarget.id, reason: '인스타그램 미팔로우' } });
+      assert.equal(disq1.status, 200);
+      assert.equal(disq1.data.winners.length, 49);
+      assert.equal(disq1.data.disqualified.length, 1);
+
+      const disq2 = await call('/admin/winners/disqualify', { method: 'POST', token, superToken, body: { participantId: secondTarget.id, reason: '본인확인 불일치' } });
+      assert.equal(disq2.status, 200);
+      assert.equal(disq2.data.winners.length, 48);
+      assert.equal(disq2.data.disqualified.length, 2);
+
+      // Supplement draw for the 2 vacancies
+      const supp = await call('/admin/draw/supplement', { method: 'POST', token, superToken, body: { count: 50 } });
+      assert.equal(supp.status, 200);
+      assert.equal(supp.data.winners.length, 50);
+      assert.equal(supp.data.supplementCount, 2);
+
+      // Ensure disqualified winners are not in the new 50 winners
+      const newWinnerIds = new Set(supp.data.winners.map(w => w.id));
+      assert.ok(!newWinnerIds.has(firstTarget.id));
+      assert.ok(!newWinnerIds.has(secondTarget.id));
+
+      // Attempting restore when full (50) returns 409
+      const restoreFail = await call('/admin/winners/restore-disqualified', { method: 'POST', token, superToken, body: { participantId: firstTarget.id } });
+      assert.equal(restoreFail.status, 409);
+
+      // Disqualify 1, then restore
+      await call('/admin/winners/disqualify', { method: 'POST', token, superToken, body: { participantId: supp.data.winners[0].id, reason: '테스트' } });
+      const restoreOk = await call('/admin/winners/restore-disqualified', { method: 'POST', token, superToken, body: { participantId: firstTarget.id } });
+      assert.equal(restoreOk.status, 200);
+      assert.equal(restoreOk.data.winners.length, 50);
     });
     await t.test('backup validation, snapshot traversal and restore preserve data and audit', async () => {
       const before = await db.getDbData();

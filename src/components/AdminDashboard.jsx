@@ -23,6 +23,7 @@ export default function AdminDashboard({ token, onLogout }) {
   const [participants, setParticipants] = useState([]);
   const [logs, setLogs] = useState([]);
   const [winners, setWinners] = useState([]);
+  const [disqualified, setDisqualified] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
@@ -60,7 +61,9 @@ export default function AdminDashboard({ token, onLogout }) {
       if (superToken) {
         const result = await apiRequest('/api/admin/backup/vault', { token, superToken });
         if (sequence !== requestSequence.current) return;
-        setLogs(result.db.logs); setWinners(result.db.winners);
+        setLogs(result.db.logs); 
+        setWinners(result.db.winners);
+        setDisqualified(result.db.disqualifiedWinners || []);
         try {
           // Preserve the last nonempty emergency copy when a server unexpectedly returns empty.
           if (result.db.participants.length || !localStorage.getItem('heyum_emergency_db_vault')) {
@@ -159,11 +162,54 @@ export default function AdminDashboard({ token, onLogout }) {
   };
   const handleDraw = async () => {
     const data = await mutate('/api/admin/draw', { count: 50 }, 'POST', true);
-    setWinners(data.winners); showToast(data.winners.length + '명의 당첨자가 선정되었습니다.'); return data;
+    setWinners(data.winners); 
+    setDisqualified([]);
+    showToast(data.winners.length + '명의 당첨자가 선정되었습니다.'); 
+    return data;
+  };
+  const handleDisqualifyWinner = async (participantId, reason) => {
+    try {
+      const data = await mutate('/api/admin/winners/disqualify', { participantId, reason }, 'POST', true);
+      setWinners(data.winners);
+      setDisqualified(data.disqualified);
+      showToast(data.message || '당첨자가 제외되었습니다.');
+      return data;
+    } catch (error) {
+      showToast(error.message);
+      throw error;
+    }
+  };
+  const handleSupplementDraw = async (targetCount = 50) => {
+    try {
+      const data = await mutate('/api/admin/draw/supplement', { count: targetCount }, 'POST', true);
+      setWinners(data.winners);
+      showToast(data.message || '추가 보충 추첨이 완료되었습니다.');
+      return data;
+    } catch (error) {
+      showToast(error.message);
+      throw error;
+    }
+  };
+  const handleRestoreDisqualified = async (participantId) => {
+    try {
+      const data = await mutate('/api/admin/winners/restore-disqualified', { participantId }, 'POST', true);
+      setWinners(data.winners);
+      setDisqualified(data.disqualified);
+      showToast(data.message || '당첨자가 복원되었습니다.');
+      return data;
+    } catch (error) {
+      showToast(error.message);
+      throw error;
+    }
   };
   const handleResetDraw = async () => {
-    if (!confirm('추첨 결과를 초기화하시겠습니까?')) return;
-    try { await mutate('/api/admin/reset-draw', undefined, 'POST', true); showToast('추첨 결과가 초기화되었습니다.'); }
+    if (!confirm('추첨 결과 및 제외 이력을 모두 초기화하시겠습니까?')) return;
+    try { 
+      await mutate('/api/admin/reset-draw', undefined, 'POST', true); 
+      setWinners([]);
+      setDisqualified([]);
+      showToast('추첨 결과 및 제외 이력이 초기화되었습니다.'); 
+    }
     catch (error) { showToast(error.message); }
   };
 
@@ -435,8 +481,12 @@ export default function AdminDashboard({ token, onLogout }) {
           <RaffleDrawer
             participants={participants}
             winners={winners}
+            disqualified={disqualified}
             onDraw={handleDraw}
             onResetDraw={handleResetDraw}
+            onDisqualifyWinner={handleDisqualifyWinner}
+            onSupplementDraw={handleSupplementDraw}
+            onRestoreDisqualified={handleRestoreDisqualified}
           />
         )}
 
