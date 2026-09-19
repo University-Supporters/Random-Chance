@@ -92,10 +92,18 @@ test('integration: authentication, duplicate concurrency, raffle and safe recove
       assert.equal((await db.getDbData()).participants.length, 55);
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'db.json'))), JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'db.backup.json'))));
     });
+    await t.test('latest registration survives main and mirror corruption without waiting five minutes', async () => {
+      await call('/participants', {method:'POST',body:entry(999)});
+      fs.writeFileSync(path.join(process.env.DATA_DIR, 'db.json'), '{broken');
+      fs.writeFileSync(path.join(process.env.DATA_DIR, 'db.backup.json'), '{broken');
+      assert.equal((await db.getDbData()).participants.length, 56);
+      const last = (await db.getDbData()).participants.find(p => p.studentId === entry(999).studentId);
+      await call('/admin/participants/' + last.id, {method:'DELETE',token});
+    });
     await t.test('total corruption fails closed but an external valid backup can recover', async () => {
       const backup = await db.getDbData();
       for (const file of ['db.json', 'db.backup.json']) fs.writeFileSync(path.join(process.env.DATA_DIR, file), '{broken');
-      for (const snap of db.getAvailableSnapshots()) fs.writeFileSync(path.join(process.env.DATA_DIR, 'backups', snap.filename), '{broken');
+      for (const snap of await db.getAvailableSnapshots()) fs.writeFileSync(path.join(process.env.DATA_DIR, 'backups', snap.filename), '{broken');
       await assert.rejects(db.getDbData, /DB와 모든 백업/);
       assert.equal(fs.readFileSync(path.join(process.env.DATA_DIR, 'db.json'), 'utf8'), '{broken');
       const result = await call('/admin/backup/restore', { method: 'POST', token, superToken, body: { backupData: backup } });

@@ -1,48 +1,30 @@
-// 2. Upstash / Vercel KV REST 연동 헬퍼
-export async function getKvData() {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return null;
-
-  try {
-    const res = await fetch(`${url}/get/heyum_booth_data`, {
-      signal: AbortSignal.timeout(10000),
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) throw new Error('원격 저장소 조회 실패');
-    const json = await res.json();
-    if (json?.error) throw new Error('원격 저장소 조회 실패');
-    if (json && json.result) {
-      return typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
-    }
-    return null;
-  } catch (e) {
-    throw e;
-  }
+// Redis REST: compare the exact version read before atomically replacing all copies.
+export const KV_KEYS = { main: 'heyum_booth_data', mirror: 'heyum_booth_data:mirror', history: 'heyum_booth_data:history', archives: 'heyum_booth_data:archives' };
+export function kvConfigured() { return Boolean((process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL) && (process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN)); }
+export async function kvCommand(command) {
+  const response = await fetch(process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL, {
+    method: 'POST', signal: AbortSignal.timeout(10000), cache: 'no-store',
+    headers: { Authorization: 'Bearer ' + (process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN), 'Content-Type': 'application/json' },
+    body: JSON.stringify(command)
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.error) throw new Error('영구 저장소 요청에 실패했습니다.');
+  return payload.result;
 }
-
-export async function saveKvData(data) {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return false;
-
-  try {
-    const res = await fetch(`${url}/set/heyum_booth_data`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(10000),
-      headers: { 
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
-    });
-    const payload = await res.json();
-    return res.ok && !payload.error;
-  } catch (e) {
-    console.error('[DB] Upstash KV write error:', e.message);
-    return false;
-  }
-}
+export const CAS_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if (current or '') ~= ARGV[1] then return 0 end
+-- Validate history type before any writes: Lua errors do not roll back earlier commands.
+local historyType = redis.call('TYPE', KEYS[3]).ok
+if historyType ~= 'none' and historyType ~= 'list' then return redis.error_reply('invalid history type') end
+redis.call('SET', KEYS[1], ARGV[2])
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('LPUSH', KEYS[3], ARGV[2])
+redis.call('LTRIM', KEYS[3], 0, 39)
+return 1
+`;
+export const getKvRaw = () => kvCommand(['GET', KV_KEYS.main]);
+export const compareAndSaveKv = (expected, data) => kvCommand(['EVAL', CAS_SCRIPT, 3, KV_KEYS.main, KV_KEYS.mirror, KV_KEYS.history, expected || '', JSON.stringify(data)]);
 
 // 3. GitHub Contents API 원격 파일 연동 헬퍼 (별도 DB 설치 없는 무료 영구 저장소)
 export async function getGitHubData() {
@@ -121,6 +103,7 @@ export async function saveGitHubData(data) {
       data._gh_sha = resJson.content?.sha;
       return true;
     }
+    if (res.status === 409 || res.status === 422) return 'conflict';
     return false;
   } catch (e) {
     console.error('[DB] GitHub API write error:', e.message);

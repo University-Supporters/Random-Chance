@@ -2,13 +2,13 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, randomInt } from 'node:crypto';
+import { verifyPassword, sessionActive, revokeSession, allowLoginAttempt, securityStatus, changePasswords } from './api/security.js';
 import { createSessionTokens } from './api/session.js';
-import { getDbData, updateDbData, appendAuditLog, addAuditLog, getStorageMode, createManualSnapshot, getAvailableSnapshots, restoreDbData, readSnapshot } from './api/db.js';
+import { getDbData, updateDbData, appendAuditLog, addAuditLog, getStorageMode, getStorageStatus, requireDurableRegistration, createManualSnapshot, getAvailableSnapshots, restoreDbData, readSnapshot } from './api/db.js';
 
 const app = express();
 const root = path.dirname(fileURLToPath(import.meta.url));
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1111';
-const SUPER_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '9372707';
+
 const sessionTokens = createSessionTokens();
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error; };
@@ -23,7 +23,7 @@ app.use(express.json({ limit: '10mb' }));
 export const authMiddleware = asyncRoute(async (req, res, next) => {
   const match = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
   req.auth = await sessionTokens.verify(match?.[1], 'admin');
-  if (!req.auth) return res.status(401).json({ success: false, message: '관리자 인증이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!req.auth || !await sessionActive(req.auth)) return res.status(401).json({ success: false, message: '관리자 인증이 만료되었습니다. 다시 로그인해 주세요.' });
   next();
 });
 export const superAuthMiddleware = asyncRoute(async (req, res, next) => {
@@ -31,27 +31,22 @@ export const superAuthMiddleware = asyncRoute(async (req, res, next) => {
   if (!auth || auth.session !== req.auth.session) return res.status(403).json({ success: false, message: '상급 관리자 2차 인증이 필요합니다.' });
   next();
 });
-const attempts = new Map();
-function loginLimit(req, res, next) {
-  const now = Date.now();
-  for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key);
-  const key = `${ip(req)}:${req.path}`;
-  const value = attempts.get(key) || { count: 0, until: now + 60000 };
-  if (++value.count > 20) return res.status(429).json({ success: false, message: '인증 시도가 많습니다. 1분 후 다시 시도해 주세요.' });
-  attempts.set(key, value); next();
-}
+const loginLimit = asyncRoute(async (req, res, next) => {
+  if (!await allowLoginAttempt(ip(req), req.path)) return res.status(429).json({ success: false, message: '인증 시도가 많습니다. 1분 후 다시 시도해 주세요.' });
+  next();
+});
 const router = express.Router();
 router.post('/admin/login', loginLimit, asyncRoute(async (req,res) => {
-  const ok = req.body?.password === ADMIN_PASSWORD;
+  const { ok, version } = await verifyPassword('admin', req.body?.password);
   await addAuditLog(ok ? 'ADMIN_LOGIN_SUCCESS' : 'ADMIN_LOGIN_FAIL', ok ? '관리자 로그인 성공' : '관리자 로그인 실패', ip(req), '관리자');
   if (!ok) fail(401, '비밀번호가 올바르지 않습니다.');
-  res.json({ success: true, token: await sessionTokens.issue('admin', randomUUID()) });
+  res.json({ success: true, token: await sessionTokens.issue('admin', randomUUID(), version) });
 }));
 router.post('/admin/super-auth', authMiddleware, loginLimit, asyncRoute(async (req,res) => {
-  const ok = req.body?.superPassword === SUPER_PASSWORD;
+  const { ok, version } = await verifyPassword('super', req.body?.superPassword);
   await addAuditLog(ok ? 'SUPER_LOGIN_SUCCESS' : 'SUPER_LOGIN_FAIL', ok ? '상급 관리자 인증 성공' : '상급 관리자 인증 실패', ip(req), '관리자');
   if (!ok) fail(403, '상급 관리자 비밀번호가 일치하지 않습니다.');
-  res.json({ success: true, superToken: await sessionTokens.issue('super', req.auth.session) });
+  res.json({ success: true, superToken: await sessionTokens.issue('super', req.auth.session, version) });
 }));
 function participantInput(body) {
   if (!body || ['studentId','name','phone'].some(key => typeof body[key] !== 'string')) fail(400, '학번, 이름, 전화번호를 입력해 주세요.');
@@ -67,6 +62,7 @@ function participantInput(body) {
   return { studentId, name, phone, phoneClean, instagram };
 }
 const register = manual => asyncRoute(async (req,res) => {
+  requireDurableRegistration();
   const entry = participantInput(req.body);
   const participant = await updateDbData(db => {
     if (db.participants.some(p => p.studentId === entry.studentId || p.phoneClean === entry.phoneClean)) fail(409, '이미 등록된 학번 또는 전화번호입니다. (1인 1회 응모)');
@@ -82,9 +78,10 @@ router.post('/participants', register(false));
 router.use('/admin', authMiddleware);
 router.get('/admin/participants', asyncRoute(async (req,res) => {
   const db = await getDbData();
-  res.json({ success: true, totalCount: db.participants.length, participants: db.participants.sort((a,b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)), winners: db.winners, storageMode: getStorageMode() });
+  res.json({ success: true, totalCount: db.participants.length, participants: db.participants.sort((a,b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)), storageMode: getStorageMode(), storage: getStorageStatus() });
 }));
 router.post('/admin/participants', register(true));
+router.post('/admin/logout', asyncRoute(async (req,res) => { await revokeSession(req.auth); res.json({ success: true }); }));
 router.delete('/admin/participants/:id', asyncRoute(async (req,res) => {
   await updateDbData(db => {
     const participant = db.participants.find(p => p.id === req.params.id);
@@ -99,6 +96,8 @@ router.delete('/admin/participants/:id', asyncRoute(async (req,res) => {
 router.get('/admin/system', (req,res) => res.json({ success: true, storageMode: getStorageMode(), timestamp: new Date().toISOString() }));
 // Second-stage boundary: no protected operation can bypass x-super-token.
 router.use('/admin', superAuthMiddleware);
+router.get('/admin/security', asyncRoute(async (req,res) => res.json({success: true, ...await securityStatus()})));
+router.post('/admin/security/passwords', asyncRoute(async (req,res) => { requireDurableRegistration(); await changePasswords(req.body || {}, ip(req)); res.json({success: true, message:'비밀번호가 변경되었습니다. 다시 로그인해 주세요.'}); }));
 router.get('/admin/logs', asyncRoute(async (req,res) => res.json({ success: true, logs: (await getDbData()).logs })));
 router.get('/admin/winners', asyncRoute(async (req,res) => res.json({ success: true, winners: (await getDbData()).winners })));
 router.post('/admin/draw', asyncRoute(async (req,res) => {
@@ -131,7 +130,7 @@ router.get('/admin/backup/download', asyncRoute(async (req,res) => {
 router.get('/admin/backup/vault', asyncRoute(async (req,res) => {
   const db = await getDbData(); delete db._gh_sha; res.json({ success: true, db });
 }));
-router.get('/admin/backup/snapshots', (req,res) => res.json({ success: true, snapshots: getAvailableSnapshots() }));
+router.get('/admin/backup/snapshots', asyncRoute(async (req,res) => res.json({ success: true, snapshots: await getAvailableSnapshots() })));
 router.post('/admin/backup/snapshot', asyncRoute(async (req,res) => {
   const snapshot = await createManualSnapshot();
   await addAuditLog('BACKUP_SNAPSHOT_CREATE', `스냅샷 생성: ${snapshot.filename}`, ip(req), '상급 관리자');
@@ -142,10 +141,11 @@ router.post('/admin/backup/restore', asyncRoute(async (req,res) => {
   res.json({ success: true, message: `${db.participants.length}명 데이터 복원 완료`, participantCount: db.participants.length });
 }));
 router.post('/admin/backup/rollback-snapshot', asyncRoute(async (req,res) => {
-  const db = readSnapshot(req.body?.filename);
+  const db = await readSnapshot(req.body?.filename);
   await restoreDbData(db, req.body.filename, { ip: ip(req) });
   res.json({ success: true, message: '스냅샷 복원이 완료되었습니다.' });
 }));
+router.get('/status', (req,res) => res.json({ success: true, storage: getStorageStatus() }));
 router.get('/health', (req,res) => res.json({ status: 'ok', storageMode: getStorageMode() }));
 app.use('/api', router);
 app.use('/', (req, res, next) => /^\/admin\/?$/.test(req.path) ? next() : router(req, res, next));

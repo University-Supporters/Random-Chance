@@ -46,6 +46,7 @@ export default function AdminDashboard({ token, onLogout }) {
   });
 
   const [storageMode, setStorageMode] = useState('');
+  const [storageWarning, setStorageWarning] = useState('');
   const [showStorageGuide, setShowStorageGuide] = useState(false);
 
   const requestSequence = useRef(0);
@@ -55,11 +56,11 @@ export default function AdminDashboard({ token, onLogout }) {
     try {
       const data = await apiRequest('/api/admin/participants', { token });
       if (sequence !== requestSequence.current) return;
-      setParticipants(data.participants); setWinners(data.winners); setStorageMode(data.storageMode);
+      setParticipants(data.participants); setStorageMode(data.storageMode); setStorageWarning(data.storage?.warning || '');
       if (superToken) {
         const result = await apiRequest('/api/admin/backup/vault', { token, superToken });
         if (sequence !== requestSequence.current) return;
-        setLogs(result.db.logs);
+        setLogs(result.db.logs); setWinners(result.db.winners);
         try {
           // Preserve the last nonempty emergency copy when a server unexpectedly returns empty.
           if (result.db.participants.length || !localStorage.getItem('heyum_emergency_db_vault')) {
@@ -169,6 +170,7 @@ export default function AdminDashboard({ token, onLogout }) {
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 animate-fade-in">
       {/* 알림 토스트 */}
+      {storageWarning && <div role="alert" className="p-4 rounded-xl bg-amber-500/15 text-amber-200">{storageWarning} 현재 등록은 일시 중단됩니다. 데이터 백업 후 영구 저장소를 연결해 주세요.</div>}
       {toastMessage && (
         <div className="fixed top-20 right-4 z-50 bg-indigo-600 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-2xl animate-scale-up">
           {toastMessage}

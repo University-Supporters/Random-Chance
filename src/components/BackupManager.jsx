@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Upload, Camera, HardDrive, RefreshCw } from 'lucide-react';
+import SecuritySettings from './SecuritySettings';
 import { apiRequest, downloadJson, readVault } from '../lib/api';
 import { formatDateTime } from '../lib/utils';
 
@@ -70,6 +71,8 @@ export default function BackupManager({ token, superToken, onRequireSuperAuth, o
           {snapshots.map(s => <div key={s.filename} className="p-3 flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-xs font-mono break-all">{s.filename}</p><p className="text-xs text-slate-500 mt-1">{formatDateTime(s.createdAt)} · {(s.sizeBytes / 1024).toFixed(1)} KB</p></div><button className={button + ' shrink-0'} disabled={busy} onClick={() => setPending({ filename: s.filename, snapshot: true })}>복원</button></div>)}
         </div>
       </div>
+      <SecuritySettings token={token} superToken={superToken} showToast={showToast} />
+      <p className="text-xs text-slate-400">브라우저 금고는 이 기기에 남습니다. 공용 기기에서는 사용을 마친 뒤 다운로드 백업을 보관하고 브라우저 데이터를 정리해 주세요.</p>
       {pending && <div role="dialog" aria-modal="true" aria-labelledby="restore-title" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-slate-900 border border-amber-400/30 rounded-2xl p-6 w-full max-w-md max-h-[90dvh] overflow-auto"><h3 id="restore-title" className="text-lg font-bold">이 백업으로 복원하시겠습니까?</h3><p className="text-sm text-slate-400 mt-3 break-all">{pending.filename}</p>{pending.data && <p className="mt-2 text-sm">참여자 {pending.data.participants.length}명 · 당첨자 {pending.data.winners?.length || 0}명</p>}<p className="text-xs text-amber-300 mt-3">현재 데이터를 교체합니다. 복원 전 상태는 안전 스냅샷으로 보관합니다.</p>{error && <p role="alert" className="text-rose-300 text-sm mt-3">{error}</p>}<div className="flex gap-3 mt-5"><button className={button} disabled={busy} onClick={() => setPending(null)}>취소</button><button className={button} disabled={busy} onClick={restore}>{busy ? '복원 중…' : '확인 및 복원'}</button></div></div></div>}
     </section>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiRequest } from './lib/api';
 import Header from './components/Header';
 import UserForm from './components/UserForm';
 import SuccessCard from './components/SuccessCard';
@@ -20,17 +21,24 @@ export default function App() {
     }
   }, []);
 
-  const handleGoHome = () => {
-    setAdminToken('');
+  const closeSession = async () => {
+    if (adminToken) {
+      try { await apiRequest('/api/admin/logout', {token: adminToken, method:'POST'}); }
+      catch (error) { alert('로그아웃을 완료하지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.'); return false; }
+    }
+    setAdminToken(''); return true;
+  };
+  const handleGoHome = async () => {
+    if (!await closeSession()) return;
     setView('form');
     if (window.location.pathname.startsWith('/admin')) {
       window.history.pushState({}, '', '/');
     }
   };
 
-  const handleToggleAdmin = () => {
+  const handleToggleAdmin = async () => {
     if (view === 'admin') {
-      setAdminToken('');
+      if (!await closeSession()) return;
       setView('form');
       window.history.pushState({}, '', '/');
     } else {
@@ -53,8 +61,8 @@ export default function App() {
 
   };
 
-  const handleAdminLogout = () => {
-    setAdminToken('');
+  const handleAdminLogout = async () => {
+    if (!await closeSession()) return;
 
     setView('form');
     window.history.pushState({}, '', '/');

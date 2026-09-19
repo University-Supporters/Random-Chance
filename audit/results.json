@@ -1,0 +1,82 @@
+{
+  "source": {
+    "repository": "https://github.com/University-Supporters/Random-Chance",
+    "branch": "main",
+    "sha": "4f514290e7b77773258e6075eda3549e3a9eb910",
+    "commitTime": "2026-09-18T13:31:50Z",
+    "homepage": "https://random-chance-orpin.vercel.app",
+    "files": 31,
+    "differences": [],
+    "checkedAt": "2026-09-18T13:39:47.160Z"
+  },
+  "startedAt": "2026-09-18T13:42:33.406Z",
+  "results": [
+    {
+      "name": "500 registrations / concurrency 25",
+      "success": 500,
+      "stored": 500,
+      "durationMs": 6266,
+      "p95Ms": 310,
+      "maxMs": 908,
+      "dbBytes": 287686
+    },
+    {
+      "name": "60 duplicate concurrent public/manual registrations",
+      "created": 1,
+      "rejected": 59,
+      "stored": 501
+    },
+    {
+      "name": "protected endpoint bypass matrix",
+      "checks": 154,
+      "blocked": 154
+    },
+    {
+      "name": "concurrent draw and token session isolation",
+      "drawStatuses": [
+        200,
+        409
+      ],
+      "uniqueWinners": 50,
+      "crossSession": "blocked"
+    },
+    {
+      "name": "backup validation and 501-record healing",
+      "invalidBackupsRejected": 4,
+      "traversalsRejected": 4,
+      "mirrorRecovery": 501,
+      "snapshotRecovery": 501
+    },
+    {
+      "name": "restart with retained data directory",
+      "stored": 501
+    },
+    {
+      "name": "replacement instance with separate ephemeral directory",
+      "oldDirectoryCount": 501,
+      "newDirectoryCount": 0
+    },
+    {
+      "name": "both live copies corrupted before next rolling snapshot",
+      "acknowledgedBefore": 2,
+      "restored": 1
+    },
+    {
+      "name": "shared KV two-instance concurrent update",
+      "statuses": [
+        201,
+        201
+      ],
+      "acknowledged": 2,
+      "persisted": 1
+    },
+    {
+      "name": "logout/session invalidation review",
+      "logoutEndpoint": false,
+      "adminTokenLifetimeHours": 8,
+      "superTokenLifetimeMinutes": 30,
+      "publicDefaultPasswords": true
+    }
+  ],
+  "finishedAt": "2026-09-18T13:42:41.660Z"
+}

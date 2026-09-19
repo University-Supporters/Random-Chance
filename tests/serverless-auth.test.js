@@ -26,6 +26,12 @@ test('no credentials configured: login on A, elevate on B, access all protected 
       });
       return { status: response.status, data: await response.json() };
     };
+    const readiness = await call(0, '/status');
+    assert.equal(readiness.data.storage.registrationReady, false);
+    const blockedRegistration = await call(0, '/participants', { body: {
+      studentId: '60240000', name: '저장소 검증', phone: '01012345678', instagram: '없음', consent: true
+    } });
+    assert.equal(blockedRegistration.status, 503);
     const login = await call(0, '/admin/login', { body: { password: '1111' } });
     assert.equal(login.status, 200);
     const token = login.data.token;

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GraduationCap, User, Phone, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 import InstagramIcon from './InstagramIcon';
 import { formatPhoneNumber } from '../lib/utils';
@@ -17,6 +17,14 @@ export default function UserForm({ onSuccess }) {
 
   const [agreeTerms, setAgreeTerms] = useState(false);
   const submitLock = useRef(false);
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageNotice, setStorageNotice] = useState('저장소 연결을 확인하고 있습니다.');
+  useEffect(() => {
+    let active = true;
+    const check = () => apiRequest('/api/status').then(data => { if (active) { setStorageReady(data.storage.registrationReady); setStorageNotice(data.storage.warning || ''); } }).catch(() => { if (active) { setStorageReady(false); setStorageNotice('서버 연결을 확인해 주세요.'); } });
+    check(); const timer = setInterval(check, 10000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,6 +63,7 @@ export default function UserForm({ onSuccess }) {
 
   const handleFirstCheck = (e) => {
     e.preventDefault();
+    if (!storageReady) return;
     setErrorMessage('');
 
     // 60xxxxxx 8자리 학번 검증
@@ -127,6 +136,7 @@ export default function UserForm({ onSuccess }) {
 
       {/* 모던 슬릭 글래스 카드 */}
       <div className="form-panel glass-panel rounded-3xl p-4 sm:p-5 shadow-2xl">
+        {storageNotice && <p role="status" className="text-xs text-amber-300 mb-2">{storageNotice}</p>}
         {errorMessage && (
           <div role="alert" className="form-error mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
@@ -257,7 +267,7 @@ export default function UserForm({ onSuccess }) {
           <div className="pt-1">
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !storageReady}
               className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-[0.99] text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <span>확인하기</span>

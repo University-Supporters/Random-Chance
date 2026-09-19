@@ -14,7 +14,7 @@ async function resolveSecret(env, buildSecretFile) {
   }
   // Existing private storage credentials are shared by serverless instances.
   // Derive a purpose-specific key; never derive it from the public default passwords.
-  const sharedCredential = env.KV_REST_API_TOKEN || env.GITHUB_TOKEN;
+  const sharedCredential = env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || env.GITHUB_TOKEN;
   if (sharedCredential?.length >= 32) {
     return createHmac('sha256', sharedCredential).update('heyum-booth/session-signing/v1').digest('hex');
   }
@@ -53,8 +53,8 @@ export function createSessionTokens(env = process.env, { buildSecretFile = bundl
   };
   const sign = async payload => createHmac('sha256', await getSecret()).update(payload).digest('base64url');
   return {
-    async issue(role, session) {
-      const payload = Buffer.from(JSON.stringify({ role, session, exp: Date.now() + (role === 'super' ? 30 * 60000 : 8 * 3600000) })).toString('base64url');
+    async issue(role, session, version = 0) {
+      const payload = Buffer.from(JSON.stringify({ role, session, version, exp: Date.now() + (role === 'super' ? 30 * 60000 : 8 * 3600000) })).toString('base64url');
       return `${payload}.${await sign(payload)}`;
     },
     async verify(token, role) {
